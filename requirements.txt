@@ -1,0 +1,17 @@
+# Core dependencies for the existing dashboards plus the KB weekly real-estate app.
+
+numpy>=1.26,<3
+pandas>=2.2,<3
+plotly>=6.0,<7
+streamlit>=1.56,<2
+requests>=2.31,<3
+yfinance>=0.2,<2
+lxml>=5,<7
+openpyxl>=3.1,<4
+scikit-learn>=1.5,<2
+statsmodels>=0.14,<1
+scipy>=1.13,<2
+statsforecast>=2.0,<3
+mlforecast>=1.0,<2
+pyarrow>=16,<21
+pytest>=9,<10
