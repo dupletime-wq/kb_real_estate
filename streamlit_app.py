@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from io import BytesIO
+from pathlib import Path
+import sys
 from typing import Any
 
 import pandas as pd
@@ -9,18 +11,53 @@ from plotly.subplots import make_subplots
 import requests
 import streamlit as st
 
-from .ingestion import QAReport, load_kb_workbook, workbook_fingerprint
-from .modeling import (
-    DEFAULT_FEATURE_SCOPE,
-    DEFAULT_HORIZONS,
-    MODEL_VERSION,
-    BacktestReport,
-    build_feature_matrix,
-    compute_historical_risk_scores,
-    forecast_region,
-    join_macro_asof,
-    run_backtests,
-)
+if __package__ in {None, ""}:
+    current_path = Path(__file__).resolve()
+    current_dir = current_path.parent
+    parent_dir = current_dir.parent
+    for candidate in (current_dir, parent_dir):
+        candidate_str = str(candidate)
+        if candidate_str not in sys.path:
+            sys.path.insert(0, candidate_str)
+    try:
+        from ingestion import QAReport, load_kb_workbook, workbook_fingerprint
+        from modeling import (
+            DEFAULT_FEATURE_SCOPE,
+            DEFAULT_HORIZONS,
+            MODEL_VERSION,
+            BacktestReport,
+            build_feature_matrix,
+            compute_historical_risk_scores,
+            forecast_region,
+            join_macro_asof,
+            run_backtests,
+        )
+    except ImportError:
+        from kb_real_estate_app.ingestion import QAReport, load_kb_workbook, workbook_fingerprint
+        from kb_real_estate_app.modeling import (
+            DEFAULT_FEATURE_SCOPE,
+            DEFAULT_HORIZONS,
+            MODEL_VERSION,
+            BacktestReport,
+            build_feature_matrix,
+            compute_historical_risk_scores,
+            forecast_region,
+            join_macro_asof,
+            run_backtests,
+        )
+else:
+    from .ingestion import QAReport, load_kb_workbook, workbook_fingerprint
+    from .modeling import (
+        DEFAULT_FEATURE_SCOPE,
+        DEFAULT_HORIZONS,
+        MODEL_VERSION,
+        BacktestReport,
+        build_feature_matrix,
+        compute_historical_risk_scores,
+        forecast_region,
+        join_macro_asof,
+        run_backtests,
+    )
 
 
 APP_TITLE = "KB Weekly Real Estate Forecast Lab"
