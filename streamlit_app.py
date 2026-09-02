@@ -62,6 +62,19 @@ SEOUL_SOUTH = (
 SEOUL_GROUPS = ("서울특별시", "강북14개구", "강남11개구")
 SEOUL_REGIONS = set(SEOUL_GROUPS + SEOUL_NORTH + SEOUL_SOUTH)
 CORE_REGIONS = ("서울특별시", "강북14개구", "강남11개구")
+INDICATOR_SHEET_PREFIXES = {
+    "5.매수우위": "buyer_index",
+    "6.매매거래활발": "sale_txn_index",
+    "7.전세수급": "jeonse_supply_index",
+    "8.전세거래활발": "jeonse_txn_index",
+}
+INDICATOR_SCOPE_LABELS = ("전국", "서울특별시", "강북14개구", "강남11개구")
+SCOPE_FOR_REGION_GROUP = {
+    "서울 전체": "서울특별시",
+    "강북권": "강북14개구",
+    "강남권": "강남11개구",
+    "기타": "전국",
+}
 MODEL_ORDER = (
     "Naive",
     "SeasonalNaive52",
@@ -89,6 +102,7 @@ class ParsedWorkbook:
     warnings: tuple[str, ...]
     fingerprint: str
     source_name: str
+    indicator_frames: dict[str, pd.DataFrame]
 
 
 @dataclass(frozen=True)
@@ -188,6 +202,13 @@ def _classify_metric(sheet_name: str, rows: list[dict[int, str]]) -> str | None:
         return "매매지수"
     if "전세지수" in sheet_name or "전세가격지수" in preview:
         return "전세지수"
+    return None
+
+
+def _classify_indicator(sheet_name: str) -> str | None:
+    for prefix, name in INDICATOR_SHEET_PREFIXES.items():
+        if sheet_name.startswith(prefix):
+            return name
     return None
 
 
@@ -316,10 +337,44 @@ def _parse_index_sheet(rows: list[dict[int, str]], *, metric: str, sheet_name: s
     return parsed, warnings_out
 
 
+def _parse_indicator_sheet(rows: list[dict[int, str]]) -> pd.DataFrame:
+    """Extract the 3rd (index) column of each region block in a leading-indicator sheet.
+
+    Sheets 5-8 repeat a fixed 3-column pattern per region (e.g. 매도자많음/매수자많음/매수우위지수);
+    only the group-level scopes in INDICATOR_SCOPE_LABELS carry per-district breakdowns useful here.
+    """
+    if len(rows) < 5:
+        return pd.DataFrame()
+    group_header = rows[1]
+    scope_cols: dict[str, int] = {}
+    for col, text in group_header.items():
+        for label in INDICATOR_SCOPE_LABELS:
+            if text.startswith(label) and label not in scope_cols:
+                scope_cols[label] = col
+    if not scope_cols:
+        return pd.DataFrame()
+
+    records: list[dict[str, Any]] = []
+    for row in rows[4:]:
+        date = _parse_excel_date(row.get(0))
+        if date is None:
+            continue
+        date = date - pd.Timedelta(days=int(date.weekday()))
+        for label, base_col in scope_cols.items():
+            value = _parse_float(row.get(base_col + 2))
+            if value is None:
+                continue
+            records.append({"date": date, "scope": label, "value": value})
+    if not records:
+        return pd.DataFrame()
+    return pd.DataFrame(records).groupby(["scope", "date"], as_index=False)["value"].last()
+
+
 @st.cache_data(show_spinner=False)
 def parse_kb_workbook(file_bytes: bytes, source_name: str) -> ParsedWorkbook:
     fingerprint = hashlib.sha256(file_bytes).hexdigest()
     metric_frames: dict[str, pd.DataFrame] = {}
+    indicator_frames: dict[str, pd.DataFrame] = {}
     sheet_rows: list[dict[str, Any]] = []
     warnings_out: list[str] = []
 
@@ -328,6 +383,7 @@ def parse_kb_workbook(file_bytes: bytes, source_name: str) -> ParsedWorkbook:
         for sheet_name, path in _workbook_sheet_paths(zf):
             rows = _read_sheet_rows(zf, path, shared_strings)
             metric = _classify_metric(sheet_name, rows)
+            indicator_name = _classify_indicator(sheet_name)
             score = 0
             if metric:
                 score += 5
@@ -339,6 +395,10 @@ def parse_kb_workbook(file_bytes: bytes, source_name: str) -> ParsedWorkbook:
                 warnings_out.extend(sheet_warnings)
                 if not parsed.empty:
                     metric_frames[metric] = parsed
+            elif indicator_name and indicator_name not in indicator_frames:
+                indicator_df = _parse_indicator_sheet(rows)
+                if not indicator_df.empty:
+                    indicator_frames[indicator_name] = indicator_df
 
     if not metric_frames:
         raise ValueError("매매지수 또는 전세지수 시트를 찾지 못했습니다. KB 주간시계열 XLSX 형식인지 확인해 주세요.")
@@ -350,6 +410,7 @@ def parse_kb_workbook(file_bytes: bytes, source_name: str) -> ParsedWorkbook:
         warnings=tuple(dict.fromkeys(warnings_out)),
         fingerprint=fingerprint,
         source_name=source_name,
+        indicator_frames=indicator_frames,
     )
 
 
@@ -366,6 +427,44 @@ def _series_for_region(frame: pd.DataFrame, region: str) -> pd.Series:
     )
     full_index = pd.date_range(series.index.min(), series.index.max(), freq=WEEKLY_FREQ)
     return series.reindex(full_index).interpolate(limit=2, limit_direction="both").dropna()
+
+
+def build_exogenous_features(
+    indicator_frames: dict[str, pd.DataFrame],
+    region: str,
+    target_index: pd.DatetimeIndex,
+) -> pd.DataFrame:
+    """Leading-indicator features (매수우위/거래활발/전세수급 지수) aligned to a region's weekly index.
+
+    These sheets only break out 전국/서울특별시/강북14개구/강남11개구, so an individual 구 borrows
+    its half's (강북/강남) series as a regional sentiment proxy, falling back to 전국.
+    """
+    if not indicator_frames:
+        return pd.DataFrame(index=target_index)
+    scope = SCOPE_FOR_REGION_GROUP.get(_region_group(region), "전국")
+    columns: dict[str, pd.Series] = {}
+    for name, frame in indicator_frames.items():
+        subset = frame.loc[frame["scope"] == scope, ["date", "value"]]
+        if subset.empty:
+            subset = frame.loc[frame["scope"] == "전국", ["date", "value"]]
+        if subset.empty:
+            continue
+        series = subset.set_index("date")["value"].sort_index()
+        series = series[~series.index.duplicated(keep="last")]
+        aligned = series.reindex(target_index).ffill()
+        if aligned.notna().sum() < 8:
+            continue
+        rolling_mean = aligned.rolling(26, min_periods=8).mean()
+        rolling_std = aligned.rolling(26, min_periods=8).std()
+        z26 = ((aligned - rolling_mean) / rolling_std.replace(0, np.nan)).fillna(0.0)
+        chg13 = aligned.diff(13).fillna(0.0)
+        fill_level = float(aligned.mean()) if aligned.notna().any() else 50.0
+        columns[f"{name}_level"] = aligned.fillna(fill_level)
+        columns[f"{name}_z26"] = z26
+        columns[f"{name}_chg13"] = chg13
+    if not columns:
+        return pd.DataFrame(index=target_index)
+    return pd.DataFrame(columns, index=target_index)
 
 
 def _mase_scale(series: pd.Series) -> float:
@@ -446,35 +545,106 @@ def _ml_feature_row(history: np.ndarray) -> list[float]:
     return features
 
 
-def _forecast_ml_hgbr(train: pd.Series, horizon: int) -> np.ndarray | None:
+def _vectorized_indicator_frame(log_values: np.ndarray) -> pd.DataFrame:
+    """Causal technical features over a log-price array: each row i only reflects log_values[0:i+1]."""
+    series = pd.Series(log_values)
+    ema12 = series.ewm(span=12, adjust=False).mean()
+    ema26 = series.ewm(span=26, adjust=False).mean()
+    macd = ema12 - ema26
+    macd_signal = macd.ewm(span=9, adjust=False).mean()
+    delta = series.diff()
+    gain = delta.clip(lower=0).ewm(alpha=1 / 14, adjust=False).mean()
+    loss = (-delta.clip(upper=0)).ewm(alpha=1 / 14, adjust=False).mean()
+    rsi14 = 100.0 - (100.0 / (1.0 + gain / loss.replace(0, np.nan)))
+    ma24 = series.rolling(24, min_periods=1).mean()
+    disparity24 = (series / ma24.replace(0, np.nan)) * 100.0
+    roll_max26 = series.rolling(26, min_periods=1).max()
+    roll_min26 = series.rolling(26, min_periods=1).min()
+    return pd.DataFrame(
+        {
+            "macd_hist": (macd - macd_signal).to_numpy(),
+            "rsi14": rsi14.fillna(50.0).to_numpy(),
+            "disparity24": disparity24.fillna(100.0).to_numpy(),
+            "drawdown26": ((series / roll_max26) - 1.0).fillna(0.0).to_numpy(),
+            "recovery26": ((series / roll_min26) - 1.0).fillna(0.0).to_numpy(),
+        }
+    )
+
+
+def _exo_last_values(train: pd.Series, exo_full: pd.DataFrame | None) -> list[float] | None:
+    if exo_full is None or exo_full.empty:
+        return None
+    aligned = exo_full.reindex(train.index).ffill().bfill().fillna(0.0)
+    if aligned.empty:
+        return None
+    return aligned.iloc[-1].to_numpy(dtype=float).tolist()
+
+
+def _ml_row_for_future(history: np.ndarray, exo_last: list[float] | None) -> list[float]:
+    row = _ml_feature_row(history)
+    row.extend(_vectorized_indicator_frame(history).iloc[-1].tolist())
+    if exo_last is not None:
+        row.extend(exo_last)
+    return row
+
+
+def _build_ml_dataset(train: pd.Series, exo_full: pd.DataFrame | None) -> tuple[np.ndarray, np.ndarray] | None:
     if len(train) < 160 or train.min() <= 0:
         return None
     log_values = np.log(train.to_numpy(dtype=float))
+    tech = _vectorized_indicator_frame(log_values)
+    exo_aligned = None
+    if exo_full is not None and not exo_full.empty:
+        exo_aligned = exo_full.reindex(train.index).ffill().bfill().fillna(0.0)
     rows: list[list[float]] = []
     targets: list[float] = []
     for idx in range(52, len(log_values)):
-        rows.append(_ml_feature_row(log_values[:idx]))
+        row = _ml_feature_row(log_values[:idx])
+        row.extend(tech.iloc[idx - 1].tolist())
+        if exo_aligned is not None:
+            row.extend(exo_aligned.iloc[idx - 1].to_numpy(dtype=float).tolist())
+        rows.append(row)
         targets.append(float(log_values[idx]))
     if len(rows) < 80:
         return None
+    return np.asarray(rows), np.asarray(targets)
+
+
+def _fit_hgbr(features: np.ndarray, targets: np.ndarray) -> HistGradientBoostingRegressor:
     model = HistGradientBoostingRegressor(
+        loss="squared_error",
         max_iter=180,
         learning_rate=0.045,
         max_leaf_nodes=15,
         l2_regularization=0.03,
         random_state=42,
     )
-    model.fit(np.asarray(rows), np.asarray(targets))
-    history = log_values.copy()
+    model.fit(features, targets)
+    return model
+
+
+def _forecast_ml_hgbr(train: pd.Series, horizon: int, exo_full: pd.DataFrame | None = None) -> np.ndarray | None:
+    dataset = _build_ml_dataset(train, exo_full)
+    if dataset is None:
+        return None
+    features, targets = dataset
+    model = _fit_hgbr(features, targets)
+    exo_last = _exo_last_values(train, exo_full)
+    history = np.log(train.to_numpy(dtype=float))
     predictions: list[float] = []
     for _ in range(horizon):
-        pred = float(model.predict([_ml_feature_row(history)])[0])
+        pred = float(model.predict([_ml_row_for_future(history, exo_last)])[0])
         predictions.append(pred)
         history = np.append(history, pred)
     return _as_positive_array(np.exp(predictions), horizon)
 
 
-def _forecast_model(model_name: str, train: pd.Series, horizon: int) -> np.ndarray | None:
+def _forecast_model(
+    model_name: str,
+    train: pd.Series,
+    horizon: int,
+    exo_full: pd.DataFrame | None = None,
+) -> np.ndarray | None:
     try:
         if model_name == "Naive":
             return _as_positive_array(_forecast_naive(train, horizon), horizon)
@@ -489,7 +659,7 @@ def _forecast_model(model_name: str, train: pd.Series, horizon: int) -> np.ndarr
         if model_name == "ARIMA(0,1,1)-log":
             return _forecast_arima_log(train, horizon, (0, 1, 1))
         if model_name == "ML-HGBR":
-            return _forecast_ml_hgbr(train, horizon)
+            return _forecast_ml_hgbr(train, horizon, exo_full)
     except Exception:
         return None
     return None
@@ -516,6 +686,7 @@ def rolling_backtest(
     horizon: int,
     max_windows: int = 4,
     progress: Callable[[int, int, str], None] | None = None,
+    exo_full: pd.DataFrame | None = None,
 ) -> BacktestResult:
     clean = series.astype(float).dropna()
     warnings_out: list[str] = []
@@ -534,7 +705,7 @@ def rolling_backtest(
             continue
         origin = float(train.iloc[-1])
         for model_name in MODEL_ORDER:
-            forecast = _forecast_model(model_name, train, horizon)
+            forecast = _forecast_model(model_name, train, horizon, exo_full)
             done += 1
             _progress(progress, done, total, f"{MODEL_LABELS[model_name]} 검증 중")
             if forecast is None:
@@ -634,11 +805,11 @@ def rolling_backtest(
     )
 
 
-def _forecast_full_models(series: pd.Series, horizon: int) -> pd.DataFrame:
+def _forecast_full_models(series: pd.Series, horizon: int, exo_full: pd.DataFrame | None = None) -> pd.DataFrame:
     dates = pd.date_range(series.index[-1] + pd.Timedelta(weeks=1), periods=horizon, freq=WEEKLY_FREQ)
     rows: list[dict[str, Any]] = []
     for model_name in MODEL_ORDER:
-        forecast = _forecast_model(model_name, series, horizon)
+        forecast = _forecast_model(model_name, series, horizon, exo_full)
         if forecast is None:
             continue
         for date, value in zip(dates, forecast):
@@ -682,8 +853,28 @@ def _forecast_interval(
     return np.minimum(lower, point_forecast), np.maximum(upper, point_forecast)
 
 
-def build_forecast_frame(series: pd.Series, horizon: int, backtest: BacktestResult) -> tuple[pd.DataFrame, pd.DataFrame]:
-    model_forecasts = _forecast_full_models(series, horizon)
+def _ensemble_weights(leaderboard: pd.DataFrame, selected_models: tuple[str, ...]) -> dict[str, float]:
+    """Backtest-performance weighting: a model with lower MASE gets proportionally more ensemble weight."""
+    if leaderboard.empty:
+        equal = 1.0 / len(selected_models)
+        return {model: equal for model in selected_models}
+    subset = leaderboard.set_index("model").reindex(selected_models)["mase"].clip(lower=1e-6)
+    inverse = 1.0 / subset
+    if inverse.isna().all() or inverse.sum() <= 0:
+        equal = 1.0 / len(selected_models)
+        return {model: equal for model in selected_models}
+    inverse = inverse.fillna(inverse.mean())
+    weights = inverse / inverse.sum()
+    return weights.to_dict()
+
+
+def build_forecast_frame(
+    series: pd.Series,
+    horizon: int,
+    backtest: BacktestResult,
+    exo_full: pd.DataFrame | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    model_forecasts = _forecast_full_models(series, horizon, exo_full)
     if model_forecasts.empty:
         dates = pd.date_range(series.index[-1] + pd.Timedelta(weeks=1), periods=horizon, freq=WEEKLY_FREQ)
         point = _forecast_naive(series, horizon)
@@ -693,8 +884,15 @@ def build_forecast_frame(series: pd.Series, horizon: int, backtest: BacktestResu
     selected_models = tuple(model for model in backtest.selected_models if model in available)
     if not selected_models:
         selected_models = (str(model_forecasts.groupby("model")["forecast"].last().index[0]),)
-    selected_frame = model_forecasts.loc[model_forecasts["model"].isin(selected_models)]
-    point_frame = selected_frame.groupby("date", as_index=False)["forecast"].mean().rename(columns={"forecast": "p50"})
+    weights = _ensemble_weights(backtest.leaderboard, selected_models)
+    selected_frame = model_forecasts.loc[model_forecasts["model"].isin(selected_models)].copy()
+    selected_frame["weight"] = selected_frame["model"].map(weights)
+    weighted = (
+        selected_frame.assign(weighted_forecast=selected_frame["forecast"] * selected_frame["weight"])
+        .groupby("date", as_index=False)
+        .agg(weighted_sum=("weighted_forecast", "sum"), weight_sum=("weight", "sum"))
+    )
+    point_frame = pd.DataFrame({"date": weighted["date"], "p50": weighted["weighted_sum"] / weighted["weight_sum"]})
     point = point_frame["p50"].to_numpy(dtype=float)
     lower, upper = _forecast_interval(point, model_forecasts, backtest, selected_models, series)
     point_frame["p10"] = lower
@@ -874,10 +1072,12 @@ def run_region_analysis(
     *,
     max_windows: int = 4,
     progress: Callable[[int, int, str], None] | None = None,
+    indicator_frames: dict[str, pd.DataFrame] | None = None,
 ) -> AnalysisResult:
     series = _series_for_region(frame, region)
-    backtest = rolling_backtest(series, horizon=horizon, max_windows=max_windows, progress=progress)
-    forecast, model_forecasts = build_forecast_frame(series, horizon, backtest)
+    exo_full = build_exogenous_features(indicator_frames or {}, region, series.index)
+    backtest = rolling_backtest(series, horizon=horizon, max_windows=max_windows, progress=progress, exo_full=exo_full)
+    forecast, model_forecasts = build_forecast_frame(series, horizon, backtest, exo_full)
     indicators = evaluate_indicators(series, horizon)
     return AnalysisResult(
         region=region,
@@ -1360,7 +1560,14 @@ def main() -> None:
                 ratio = 0.0 if total <= 0 else min(1.0, done / total)
                 progress_bar.progress(ratio, text=message)
 
-            result = run_region_analysis(frame, region, horizon, max_windows=4, progress=progress_callback)
+            result = run_region_analysis(
+                frame,
+                region,
+                horizon,
+                max_windows=8,
+                progress=progress_callback,
+                indicator_frames=parsed.indicator_frames,
+            )
             st.session_state["analysis_cache"][result_key] = result
             progress_bar.progress(1.0, text="완료")
             status.update(label="예측과 검증이 완료되었습니다.", state="complete", expanded=False)
