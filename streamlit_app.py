@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from io import BytesIO
 import hashlib
 import math
+import os
 from pathlib import Path
 import re
 from typing import Any, Callable
@@ -15,6 +16,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import requests
 from scipy import stats
 from sklearn.ensemble import HistGradientBoostingRegressor
 import streamlit as st
@@ -75,6 +77,21 @@ SCOPE_FOR_REGION_GROUP = {
     "강남권": "강남11개구",
     "기타": "전국",
 }
+ECOS_BASE_URL = "https://ecos.bok.or.kr/api/StatisticSearch"
+ECOS_SERIES = {
+    # Verified live against the ECOS API: StatisticItemList for each STAT_CODE.
+    "mortgage_rate": {
+        "stat_code": "121Y006",  # 예금은행 대출금리(신규취급액 기준)
+        "item_code": "BECBLA0302",  # 주택담보대출
+        "cycle": "M",
+    },
+    "m2": {
+        "stat_code": "161Y009",  # M2 경제주체별 보유현황(평잔, 계절조정계열)
+        "item_code": "BBHS00",  # M2(평잔, 계절조정계열)
+        "cycle": "M",
+    },
+}
+ECOS_RELEASE_LAG_DAYS = 42  # BOK publishes monthly rate/M2 stats roughly a month after month-end; padded for safety.
 MODEL_ORDER = (
     "Naive",
     "SeasonalNaive52",
@@ -429,39 +446,113 @@ def _series_for_region(frame: pd.DataFrame, region: str) -> pd.Series:
     return series.reindex(full_index).interpolate(limit=2, limit_direction="both").dropna()
 
 
+def _ecos_api_key() -> str:
+    try:
+        secret_key = st.secrets.get("ECOS_API_KEY", "")
+    except Exception:
+        secret_key = ""
+    return str(secret_key or os.environ.get("ECOS_API_KEY", "")).strip()
+
+
+@st.cache_data(show_spinner=False, ttl=6 * 3600)
+def fetch_ecos_series(series_key: str, api_key: str, start: str = "200301", end: str | None = None) -> pd.DataFrame:
+    """Monthly BOK ECOS series (mortgage_rate or m2): columns [date, value], ref-period dates (not release dates)."""
+    spec = ECOS_SERIES[series_key]
+    end = end or pd.Timestamp.today().strftime("%Y%m")
+    url = "/".join(
+        [
+            ECOS_BASE_URL,
+            api_key,
+            "json",
+            "kr",
+            "1",
+            "2000",
+            spec["stat_code"],
+            spec["cycle"],
+            start,
+            end,
+            spec["item_code"],
+        ]
+    )
+    response = requests.get(url, timeout=10)
+    response.raise_for_status()
+    payload = response.json()
+    block = payload.get("StatisticSearch")
+    if block is None:
+        message = payload.get("RESULT", {}).get("MESSAGE", "ECOS API 응답을 해석하지 못했습니다.")
+        raise RuntimeError(message)
+    rows = block.get("row", [])
+    if not rows:
+        return pd.DataFrame(columns=["date", "value"])
+    frame = pd.DataFrame(rows)
+    frame["date"] = pd.to_datetime(frame["TIME"], format="%Y%m")
+    frame["value"] = pd.to_numeric(frame["DATA_VALUE"], errors="coerce")
+    return frame.dropna(subset=["value"]).sort_values("date")[["date", "value"]].reset_index(drop=True)
+
+
+def _monthly_to_weekly_asof(monthly: pd.DataFrame, target_index: pd.DatetimeIndex, release_lag_days: int) -> pd.Series:
+    """Align a monthly (reference-period) series onto a weekly index without look-ahead: a value only becomes
+    visible `release_lag_days` after its reference date, matching BOK's actual publication delay."""
+    if monthly.empty:
+        return pd.Series(np.nan, index=target_index, dtype=float)
+    source = monthly.rename(columns={"date": "ref_date"}).copy()
+    source["date"] = source["ref_date"] + pd.Timedelta(days=release_lag_days)
+    source = source.sort_values("date")[["date", "value"]]
+    target = pd.DataFrame({"date": pd.DatetimeIndex(target_index)}).sort_values("date")
+    merged = pd.merge_asof(target, source, on="date", direction="backward")
+    return pd.Series(merged["value"].to_numpy(dtype=float), index=merged["date"]).reindex(target_index)
+
+
 def build_exogenous_features(
     indicator_frames: dict[str, pd.DataFrame],
     region: str,
     target_index: pd.DatetimeIndex,
+    macro_series: dict[str, pd.DataFrame] | None = None,
 ) -> pd.DataFrame:
-    """Leading-indicator features (매수우위/거래활발/전세수급 지수) aligned to a region's weekly index.
-
-    These sheets only break out 전국/서울특별시/강북14개구/강남11개구, so an individual 구 borrows
-    its half's (강북/강남) series as a regional sentiment proxy, falling back to 전국.
+    """Leading-indicator features aligned to a region's weekly index:
+    - KB 매수우위/거래활발/전세수급 지수 (region-scoped; sheets only break out 전국/서울특별시/강북14개구/강남11개구,
+      so an individual 구 borrows its half's series as a regional sentiment proxy, falling back to 전국)
+    - BOK ECOS 주담대 금리 / M2 (national, released with a publication lag applied via _monthly_to_weekly_asof)
     """
-    if not indicator_frames:
-        return pd.DataFrame(index=target_index)
-    scope = SCOPE_FOR_REGION_GROUP.get(_region_group(region), "전국")
     columns: dict[str, pd.Series] = {}
-    for name, frame in indicator_frames.items():
-        subset = frame.loc[frame["scope"] == scope, ["date", "value"]]
-        if subset.empty:
-            subset = frame.loc[frame["scope"] == "전국", ["date", "value"]]
-        if subset.empty:
-            continue
-        series = subset.set_index("date")["value"].sort_index()
-        series = series[~series.index.duplicated(keep="last")]
-        aligned = series.reindex(target_index).ffill()
-        if aligned.notna().sum() < 8:
-            continue
-        rolling_mean = aligned.rolling(26, min_periods=8).mean()
-        rolling_std = aligned.rolling(26, min_periods=8).std()
-        z26 = ((aligned - rolling_mean) / rolling_std.replace(0, np.nan)).fillna(0.0)
-        chg13 = aligned.diff(13).fillna(0.0)
-        fill_level = float(aligned.mean()) if aligned.notna().any() else 50.0
-        columns[f"{name}_level"] = aligned.fillna(fill_level)
-        columns[f"{name}_z26"] = z26
-        columns[f"{name}_chg13"] = chg13
+    if indicator_frames:
+        scope = SCOPE_FOR_REGION_GROUP.get(_region_group(region), "전국")
+        for name, frame in indicator_frames.items():
+            subset = frame.loc[frame["scope"] == scope, ["date", "value"]]
+            if subset.empty:
+                subset = frame.loc[frame["scope"] == "전국", ["date", "value"]]
+            if subset.empty:
+                continue
+            series = subset.set_index("date")["value"].sort_index()
+            series = series[~series.index.duplicated(keep="last")]
+            aligned = series.reindex(target_index).ffill()
+            if aligned.notna().sum() < 8:
+                continue
+            rolling_mean = aligned.rolling(26, min_periods=8).mean()
+            rolling_std = aligned.rolling(26, min_periods=8).std()
+            z26 = ((aligned - rolling_mean) / rolling_std.replace(0, np.nan)).fillna(0.0)
+            chg13 = aligned.diff(13).fillna(0.0)
+            fill_level = float(aligned.mean()) if aligned.notna().any() else 50.0
+            columns[f"{name}_level"] = aligned.fillna(fill_level)
+            columns[f"{name}_z26"] = z26
+            columns[f"{name}_chg13"] = chg13
+
+    if macro_series:
+        mortgage = macro_series.get("mortgage_rate")
+        if mortgage is not None and not mortgage.empty:
+            level = _monthly_to_weekly_asof(mortgage, target_index, ECOS_RELEASE_LAG_DAYS).ffill()
+            if level.notna().sum() >= 8:
+                fill_level = float(level.mean()) if level.notna().any() else 0.0
+                columns["mortgage_rate_level"] = level.fillna(fill_level)
+                columns["mortgage_rate_chg13"] = level.diff(13).fillna(0.0)
+        m2 = macro_series.get("m2")
+        if m2 is not None and not m2.empty:
+            level = _monthly_to_weekly_asof(m2, target_index, ECOS_RELEASE_LAG_DAYS).ffill()
+            if level.notna().sum() >= 60:
+                yoy = level.pct_change(52).fillna(0.0)
+                columns["m2_yoy"] = yoy
+                columns["m2_yoy_chg13"] = yoy.diff(13).fillna(0.0)
+
     if not columns:
         return pd.DataFrame(index=target_index)
     return pd.DataFrame(columns, index=target_index)
@@ -1065,6 +1156,19 @@ def evaluate_indicators(series: pd.Series, horizon: int) -> IndicatorResult:
     return IndicatorResult(frame=indicators, passed_summary=passed_summary, passed_events=passed_events)
 
 
+def load_macro_series(api_key: str) -> tuple[dict[str, pd.DataFrame], tuple[str, ...]]:
+    series: dict[str, pd.DataFrame] = {}
+    warnings_out: list[str] = []
+    for name in ECOS_SERIES:
+        try:
+            fetched = fetch_ecos_series(name, api_key)
+            if not fetched.empty:
+                series[name] = fetched
+        except Exception as exc:
+            warnings_out.append(f"한국은행 ECOS '{name}' 데이터를 불러오지 못했습니다: {exc}")
+    return series, tuple(warnings_out)
+
+
 def run_region_analysis(
     frame: pd.DataFrame,
     region: str,
@@ -1073,9 +1177,10 @@ def run_region_analysis(
     max_windows: int = 4,
     progress: Callable[[int, int, str], None] | None = None,
     indicator_frames: dict[str, pd.DataFrame] | None = None,
+    macro_series: dict[str, pd.DataFrame] | None = None,
 ) -> AnalysisResult:
     series = _series_for_region(frame, region)
-    exo_full = build_exogenous_features(indicator_frames or {}, region, series.index)
+    exo_full = build_exogenous_features(indicator_frames or {}, region, series.index, macro_series)
     backtest = rolling_backtest(series, horizon=horizon, max_windows=max_windows, progress=progress, exo_full=exo_full)
     forecast, model_forecasts = build_forecast_frame(series, horizon, backtest, exo_full)
     indicators = evaluate_indicators(series, horizon)
@@ -1542,13 +1647,32 @@ def main() -> None:
             st.error("선택 가능한 지역이 없습니다.")
             return
         region = st.selectbox("지역", region_options, index=0)
+
+        st.header("매크로 연동 (선택)")
+        default_ecos_key = _ecos_api_key()
+        use_macro = st.checkbox("한국은행 ECOS 연동 (주담대 금리·M2)", value=bool(default_ecos_key))
+        ecos_key_input = ""
+        if use_macro:
+            ecos_key_input = st.text_input(
+                "ECOS 인증키",
+                value=default_ecos_key,
+                type="password",
+                help="비워두면 환경변수 ECOS_API_KEY 또는 .streamlit/secrets.toml 값을 사용합니다.",
+            )
+
         run_button = st.button("예측 실행", type="primary", use_container_width=True)
 
     _data_summary(parsed, frame, region)
     st.subheader("서울 권역 최근 변화율")
     st.plotly_chart(make_comparison_chart(frame), use_container_width=True)
 
-    result_key = (parsed.fingerprint, metric, region, horizon)
+    macro_series: dict[str, pd.DataFrame] = {}
+    if use_macro and ecos_key_input:
+        macro_series, macro_warnings = load_macro_series(ecos_key_input)
+        for message in macro_warnings:
+            st.sidebar.warning(message)
+
+    result_key = (parsed.fingerprint, metric, region, horizon, tuple(sorted(macro_series)))
     if "analysis_cache" not in st.session_state:
         st.session_state["analysis_cache"] = {}
 
@@ -1567,6 +1691,7 @@ def main() -> None:
                 max_windows=8,
                 progress=progress_callback,
                 indicator_frames=parsed.indicator_frames,
+                macro_series=macro_series,
             )
             st.session_state["analysis_cache"][result_key] = result
             progress_bar.progress(1.0, text="완료")
