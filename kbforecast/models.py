@@ -50,6 +50,12 @@ def hgb_model(
 ) -> ModelFn:
     def fit_predict(X_train: pd.DataFrame, y_train: np.ndarray, X_pred: pd.DataFrame) -> np.ndarray:
         idx = np.arange(0, len(X_train), row_stride)
+        # a column that is entirely NaN / constant in this training window (e.g. a survey that starts later) breaks
+        # HGB's binning; such a column carries no information here, so leave it out for this fit
+        usable = [c for c in X_train.columns if X_train[c].iloc[idx].nunique(dropna=True) >= 2]
+        if not usable:
+            return np.full(len(X_pred), float(np.mean(y_train)))
+        X_train, X_pred = X_train[usable], X_pred[usable]
         model = HistGradientBoostingRegressor(
             loss="squared_error",
             max_iter=max_iter,
