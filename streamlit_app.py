@@ -14,7 +14,7 @@ from kbforecast.engine import ENGINE_VERSION, EngineFit, fit_engine, forecast_re
 from kbforecast.indicators import IndicatorResult, evaluate_indicators
 from kbforecast.kb_panel import KBPanel, parse_kb_panel, seoul_region_keys
 from kbforecast.macro import ecos_api_key, load_macro, macro_weekly
-from kbforecast.overlay import RateSeries, load_base_rate
+from kbforecast.overlay import RateSeries, load_base_rate, scenario_adjustments
 
 APP_TITLE = "KB 부동산 시세 예측 대시보드"
 CACHE_DIR = Path(".cache")
@@ -271,6 +271,50 @@ def _overlay_note(fit: EngineFit, region: str, horizon: int) -> None:
     )
 
 
+def _rate_scenario(fit: EngineFit, region: str, horizon: int, rate: RateSeries | None) -> None:
+    """Seoul-only what-if: how the policy-rate term would evolve if the base rate follows a hypothetical path."""
+    if not fit.overlay or rate is None or region not in seoul_region_keys(fit.hierarchy):
+        return
+    anchors = [h for h in HORIZONS if h in fit.overlay]
+    slopes = {h: fit.overlay[h]["slope"] for h in anchors}
+    try:
+        raw = {h: float(fit.predictions[h].xs(fit.last_date, level="date").loc[region, "pred_raw"]) for h in anchors}
+    except KeyError:
+        return
+    with st.expander("기준금리 시나리오 시뮬레이션 (서울)"):
+        current = float(rate.frame.sort_values("date")["value"].iloc[-1])
+        c1, c2 = st.columns(2)
+        terminal = c1.number_input("최종 기준금리 (%)", min_value=1.0, max_value=7.0, value=max(3.75, current), step=0.25, format="%.2f")
+        gap = c2.slider("인상 간격 (주, 1회 0.25%p)", min_value=4, max_value=26, value=7, help="금통위는 연 8회(약 6~7주 간격)입니다.")
+        candidates = sorted({round(current, 2), 3.5, 3.75, 4.0, round(terminal, 2)})
+        runs = {c: scenario_adjustments(rate, c, gap, slopes, raw) for c in candidates}
+        anchor = min(anchors, key=lambda a: abs(a - horizon))
+        fig = go.Figure()
+        for c, run in runs.items():
+            name = f"{c:.2f}%" + (" (현재 유지)" if abs(c - current) < 1e-9 else "")
+            fig.add_trace(go.Scatter(x=run["timeline"].index, y=run["timeline"][f"adj_{anchor}"], mode="lines", name=name,
+                                     line=dict(width=3 if abs(c - terminal) < 1e-9 else 1.5)))
+        fig.update_layout(height=320, margin=dict(l=20, r=20, t=30, b=20), yaxis_title=f"{anchor}주 예측에 더해지는 금리 보정 (%p)",
+                          hovermode="x unified", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0))
+        st.plotly_chart(fig, width="stretch")
+        rows = []
+        for c, run in runs.items():
+            info = run["summary"][anchor]
+            rows.append({
+                "최종 금리(%)": c, "26주 금리 변화 최대(%p)": run["peak_delta26"],
+                "보정 최대 하락(%p)": info["peak_adjustment_pp"], "그 시점": info["peak_date"].date(),
+                "보정 소멸 시점": run["fade_date"].date() if run["peak_delta26"] > 0 else None,
+                "보정 전 예측(%)": info["raw_return_pct"], "보정 최대 시 예측(%)": info["return_at_peak_pct"],
+            })
+        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True,
+                     column_config={c: st.column_config.NumberColumn(format="%.2f") for c in ("최종 금리(%)", "26주 금리 변화 최대(%p)", "보정 최대 하락(%p)", "보정 전 예측(%)", "보정 최대 시 예측(%)")})
+        st.caption(
+            "**이 시뮬레이션이 말해주는 것과 아닌 것.** 보정 항은 '기준금리 *26주 변화*'에 비례하므로, 같은 속도로 올리는 동안에는 최종 금리가 3.5%든 3.75%든 4.0%든 "
+            "최대 하락폭이 같고 (높을수록 하락 압력이 더 오래 지속), 인상을 멈추고 26주가 지나면 보정이 0으로 돌아갑니다. 금리 *수준*의 누적 효과는 이 모형에 들어 있지 않습니다. "
+            "'보정 최대 시 예측'은 그 시점에도 다른 요인은 지금 예측(보정 전)과 같다고 둔 단순 합산이며 모형을 다시 학습한 예측이 아닙니다. 계수는 과거 몇 차례 금리 사이클에서 추정되어 불확실합니다(p≈0.13)."
+        )
+
+
 def _validation_tab(fit: EngineFit, kb: KBPanel, region: str, horizon: int) -> None:
     seoul = tuple(sorted(seoul_region_keys(kb.hierarchy)))
     frames = []
@@ -449,6 +493,7 @@ def main() -> None:
             cols[2].metric("기준일", str(fc.origin.date()))
             st.plotly_chart(make_forecast_chart(series, fc.path, f"KB {target_label}"), width="stretch")
             _overlay_note(fit, region, horizon)
+            _rate_scenario(fit, region, horizon, rate)
             with st.expander("기간별 예측 수익률", expanded=False):
                 st.dataframe(
                     fc.anchor_table.rename(columns={"h": "기간(주)", "pred_pct": "예측 수익률(%)", "lo_pct": "하단(%)", "hi_pct": "상단(%)"}),

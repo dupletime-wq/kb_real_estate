@@ -101,3 +101,65 @@ def apply_seoul_rate_overlay(
     out["overlay"] = adj
     out["pred"] = out["pred_raw"] + out["overlay"]
     return out, pd.Series(slopes, dtype=float)
+
+
+def scenario_path(rate: RateSeries, terminal: float, gap_weeks: int = 7, step: float = 0.25) -> pd.DataFrame:
+    """Hypothetical future policy-rate moves: `step` per move, one move every `gap_weeks` weeks after the last known date,
+    until `terminal` is reached (the last move is shortened if needed). Rows: date, value (level after the move)."""
+    frame = rate.frame.sort_values("date")
+    level = float(frame["value"].iloc[-1])
+    rows = []
+    date = pd.Timestamp(rate.known_through)
+    while abs(terminal - level) > 1e-9 and len(rows) < 40:
+        move = min(step, abs(terminal - level)) * (1.0 if terminal > level else -1.0)
+        level = round(level + move, 4)
+        date = date + pd.Timedelta(weeks=gap_weeks)
+        rows.append({"date": date, "value": level})
+    return pd.DataFrame({"date": pd.to_datetime([r["date"] for r in rows]), "value": [r["value"] for r in rows]})
+
+
+def scenario_adjustments(
+    rate: RateSeries,
+    terminal: float,
+    gap_weeks: int,
+    slopes: dict[int, float],
+    raw_log_return: dict[int, float],
+    tail_weeks: int = 40,
+) -> dict:
+    """What the Seoul overlay would add over time if the policy rate followed the path to `terminal`.
+
+    The overlay is `slope[h] * (26-week rate change known at the forecast origin)`, so along a hypothetical path we can
+    evaluate it at every later weekly date. Returns the path, a weekly timeline of the 26-week change and of the
+    adjustment per horizon (%p), and a summary: the peak drag, when it occurs, and when it fades back to zero (26 weeks after
+    the last move). `raw_log_return[h]` (the un-adjusted forecast) is only used to show raw + adjustment at the peak: this is a
+    sensitivity of the rate term, not a re-forecast of the whole model.
+
+    Because the predictor is a 26-week *change*, the terminal level itself matters only through the pace of moves: a steady
+    25bp every ~7 weeks gives about the same 26-week change whether it stops at 3.5%, 3.75% or 4.0%; a higher terminal just
+    keeps the drag going for longer.
+    """
+    path = scenario_path(rate, terminal, gap_weeks)
+    frame = rate.frame.sort_values("date")
+    frame = frame[frame["date"] < pd.Timestamp(rate.known_through)]  # drop the "known through" marker row
+    combined = pd.concat([frame[["date", "value"]], path], ignore_index=True)
+    last_move = pd.Timestamp(combined["date"].max())  # last actual (or hypothetical) rate change
+    weekly = pd.date_range(frame["date"].min(), max(last_move, pd.Timestamp(rate.known_through)) + pd.Timedelta(weeks=tail_weeks), freq="W-MON")
+    z = rate_change_weekly(RateSeries(combined, last_move, "scenario"), weekly)
+    start = weekly[weekly >= pd.Timestamp(rate.known_through)][0]
+    timeline = pd.DataFrame({"delta26": z.loc[start:]})
+    for h, slope in slopes.items():
+        timeline[f"adj_{h}"] = slope * timeline["delta26"] * 100.0
+    summary = {}
+    for h, slope in slopes.items():
+        adj = timeline[f"adj_{h}"]
+        peak_date = adj.idxmin() if slope < 0 else adj.idxmax()
+        peak = float(adj.loc[peak_date])
+        summary[h] = {
+            "peak_adjustment_pp": peak,
+            "peak_date": peak_date,
+            "raw_return_pct": (np.exp(raw_log_return[h]) - 1.0) * 100.0,
+            "return_at_peak_pct": (np.exp(raw_log_return[h] + peak / 100.0) - 1.0) * 100.0,
+        }
+    fade = last_move + pd.Timedelta(weeks=CHANGE_WEEKS)
+    return {"terminal": terminal, "path": path, "timeline": timeline, "summary": summary, "fade_date": fade,
+            "peak_delta26": float(timeline["delta26"].max())}

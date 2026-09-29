@@ -77,3 +77,21 @@ def test_bundled_rate_snapshot_is_sane():
 def test_seoul_region_keys_cover_city_groups_and_districts():
     kb = make_panel()
     assert seoul_region_keys(kb.hierarchy) == {"서울특별시", "강북14개구", "강남11개구", "강북구", "노원구", "강남구", "서초구"}
+
+
+def test_scenario_path_and_adjustment_fade():
+    from kbforecast.overlay import scenario_adjustments, scenario_path
+
+    rate = _rate({"2014-01-01": 3.0}, through="2018-02-01")
+    path = scenario_path(rate, 3.6, gap_weeks=4)
+    assert list(path["value"]) == [3.25, 3.5, 3.6]  # last move shortened to land on the terminal rate
+    assert path["date"].is_monotonic_increasing and path["date"].iloc[0] > pd.Timestamp("2018-02-01")
+    run = scenario_adjustments(rate, 3.5, 4, {26: -0.02}, {26: 0.05})
+    tl = run["timeline"]
+    assert run["peak_delta26"] == 0.5
+    assert tl["adj_26"].min() == -0.02 * 0.5 * 100
+    assert tl["delta26"].iloc[-1] == 0.0  # drag fades once the last move is 26+ weeks old
+    assert run["summary"][26]["return_at_peak_pct"] < run["summary"][26]["raw_return_pct"]
+    # no move needed -> nothing beyond what is already known
+    flat = scenario_adjustments(rate, 3.0, 4, {26: -0.02}, {26: 0.05})
+    assert flat["path"].empty
