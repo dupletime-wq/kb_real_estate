@@ -55,6 +55,13 @@ class KBPanel:
         return KBPanel(self.jeonse, self.sale, self.sentiment, self.hierarchy, self.fingerprint, self.warnings)
 
 
+def seoul_region_keys(hierarchy: pd.DataFrame) -> set[str]:
+    """Seoul city, its two half-city groups and its 25 districts (the series the policy-rate overlay applies to)."""
+    h = hierarchy
+    mask = h["key"].isin(["서울특별시", *SEOUL_GROUPS]) | ((h["province"] == "서울특별시") & (h["level"] == "gu"))
+    return set(h.loc[mask, "key"])
+
+
 def _to_date(text: str) -> pd.Timestamp | None:
     if not text:
         return None

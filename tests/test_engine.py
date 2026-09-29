@@ -81,3 +81,12 @@ def test_pooled_ridge_recovers_a_simple_signal():
     y = 0.5 * X["a"].to_numpy() + rng.normal(scale=0.1, size=4000)
     pred = M.ridge_model(1.0)(X.iloc[:3000], y[:3000], X.iloc[3000:])
     assert np.corrcoef(pred, y[3000:])[0, 1] > 0.9
+
+
+def test_hgb_tolerates_columns_that_are_all_nan_or_constant_in_training():
+    rng = np.random.default_rng(2)
+    X = pd.DataFrame({"a": rng.normal(size=600), "late_survey": np.nan, "const": 1.0})
+    X.loc[500:, "late_survey"] = rng.normal(size=100)  # only observed after the training window
+    y = 0.4 * X["a"].to_numpy() + rng.normal(scale=0.1, size=600)
+    pred = M.hgb_model(max_iter=50, min_samples_leaf=20)(X.iloc[:400], y[:400], X.iloc[400:])
+    assert np.isfinite(pred).all() and np.corrcoef(pred, y[400:])[0, 1] > 0.7
