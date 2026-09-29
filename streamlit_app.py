@@ -166,7 +166,10 @@ def make_contribution_chart(contrib: pd.Series) -> go.Figure:
     colors = ["#c62828" if v < 0 else "#2e7d32" for v in contrib.values]
     fig = go.Figure(go.Bar(x=contrib.values, y=contrib.index, orientation="h", marker_color=colors,
                            text=[f"{v:+.2f}%p" for v in contrib.values], textposition="outside"))
-    fig.update_layout(height=280, margin=dict(l=20, r=40, t=20, b=20), xaxis_title="예측 수익률 기여도 (%p)")
+    span = float(np.abs(contrib.values).max()) or 1.0
+    fig.update_traces(cliponaxis=False)
+    fig.update_layout(height=280, margin=dict(l=20, r=60, t=20, b=20), xaxis_title="예측 수익률 기여도 (%p)",
+                      xaxis_range=[min(0.0, float(contrib.min())) - span * 0.25, max(0.0, float(contrib.max())) + span * 0.25])
     return fig
 
 
@@ -256,7 +259,7 @@ def _validation_tab(fit: EngineFit, kb: KBPanel, region: str, horizon: int) -> N
     table["구간 적중률"] = table["구간 적중률"] * 100
     cols = ["대상", "예측 기간(주)", "검증 표본", "모델 평균오차(%p)", "추세연장 평균오차(%p)", "무변화 평균오차(%p)", "개선율(vs 추세연장, %)", "구간 적중률"]
     st.dataframe(
-        table[cols], use_container_width=True, hide_index=True,
+        table[cols], width="stretch", hide_index=True,
         column_config={c: st.column_config.NumberColumn(format="%.2f") for c in cols[3:]} | {"구간 적중률": st.column_config.NumberColumn(format="%.1f%%")},
     )
     first, last = table["from"].min().date(), table["to"].max().date()
@@ -290,7 +293,7 @@ def _rank_tab(fit: EngineFit, kb: KBPanel, horizon: int) -> None:
     table["구분"] = table["구분"].map(level_names).fillna("")
     kinds = st.multiselect("지역 구분", sorted(table["구분"].unique()), default=[k for k in ("구·군", "시") if k in set(table["구분"])])
     view = table[table["구분"].isin(kinds)] if kinds else table
-    st.dataframe(view.sort_values("예측 수익률(%)", ascending=False), use_container_width=True, hide_index=True,
+    st.dataframe(view.sort_values("예측 수익률(%)", ascending=False), width="stretch", hide_index=True,
                  column_config={c: st.column_config.NumberColumn(format="%.2f") for c in ("예측 수익률(%)", "하단(%)", "상단(%)")})
     st.caption(f"{anchor}주 후 누적 수익률 예측(기준일 {fit.last_date.date()}). 하단·상단은 예측구간입니다.")
 
@@ -358,7 +361,7 @@ def main() -> None:
     prev13 = float(series.iloc[-14]) if len(series) > 14 else np.nan
     prev52 = float(series.iloc[-53]) if len(series) > 53 else np.nan
     top = st.columns(4)
-    top[0].metric("데이터 기간", f"{series.index.min().date()} ~ {series.index.max().date()}")
+    top[0].metric("최근 기준일", str(series.index.max().date()), help=f"데이터 시작: {series.index.min().date()}")
     top[1].metric("분석 지역 수", f"{kb.sale.shape[1]:,}개")
     top[2].metric("최근 지수", _format_value(latest, 2))
     top[3].metric("13주 변화율", _format_pct((latest / prev13 - 1) * 100, 2) if pd.notna(prev13) else "-",
@@ -366,7 +369,7 @@ def main() -> None:
                   help="큰 숫자는 13주 변화율, 델타는 52주 변화율입니다.")
     st.caption(f"파일 지문: `{kb.fingerprint[:12]}` · 원본: `{source_name}`")
     st.subheader("주요 권역 최근 변화율")
-    st.plotly_chart(make_comparison_chart(kb), use_container_width=True)
+    st.plotly_chart(make_comparison_chart(kb), width="stretch")
 
     st.subheader(f"{region} {target_label} 예측 결과")
     try:
@@ -386,11 +389,11 @@ def main() -> None:
             cols[0].metric(f"{horizon}주 후 예측 지수", _format_value(end["p50"], 2), delta=_format_pct((end["p50"] / fc.last_value - 1) * 100, 2))
             cols[1].metric("예측구간 (하단 ~ 상단)", f"{_format_value(end['p10'], 1)} ~ {_format_value(end['p90'], 1)}")
             cols[2].metric("기준일", str(fc.origin.date()))
-            st.plotly_chart(make_forecast_chart(series, fc.path, f"KB {target_label}"), use_container_width=True)
+            st.plotly_chart(make_forecast_chart(series, fc.path, f"KB {target_label}"), width="stretch")
             with st.expander("기간별 예측 수익률", expanded=False):
                 st.dataframe(
                     fc.anchor_table.rename(columns={"h": "기간(주)", "pred_pct": "예측 수익률(%)", "lo_pct": "하단(%)", "hi_pct": "상단(%)"}),
-                    use_container_width=True, hide_index=True,
+                    width="stretch", hide_index=True,
                     column_config={c: st.column_config.NumberColumn(format="%.2f") for c in ("예측 수익률(%)", "하단(%)", "상단(%)")},
                 )
     with tabs[1]:
@@ -400,12 +403,12 @@ def main() -> None:
             st.info("이 지역의 기여도 분해를 계산할 수 없습니다.")
         else:
             st.markdown(f"**{anchor}주 예측에서 각 정보군이 미친 영향** (선형 모형 절반의 분해, 평균 대비 %p)")
-            st.plotly_chart(make_contribution_chart(contrib.loc[region]), use_container_width=True)
+            st.plotly_chart(make_contribution_chart(contrib.loc[region]), width="stretch")
             st.caption("양수는 예측을 위로, 음수는 아래로 미는 요인입니다. 블렌드의 다른 절반(트리 모형)은 비선형이라 분해하지 않았습니다.")
         fig = make_sentiment_chart(kb, region)
         if fig is not None:
             st.markdown("**KB 심리지표 (최근 3년, 해당 지역이 속한 권역 기준)**")
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
     with tabs[2]:
         _validation_tab(fit, kb, region, horizon)
     with tabs[3]:
@@ -420,12 +423,12 @@ def main() -> None:
                     columns={"indicator": "지표", "signal": "신호", "direction": "검증 방향", "samples": "표본 수",
                              "hit_rate_pct": "적중률(%)", "mean_forward_return_pct": "평균 선행수익률(%)", "p_value": "p-value"}
                 ),
-                use_container_width=True, hide_index=True,
+                width="stretch", hide_index=True,
                 column_config={"적중률(%)": st.column_config.NumberColumn(format="%.1f"),
                                "평균 선행수익률(%)": st.column_config.NumberColumn(format="%.3f"),
                                "p-value": st.column_config.NumberColumn(format="%.4f")},
             )
-        st.plotly_chart(make_technical_chart(series, ind), use_container_width=True)
+        st.plotly_chart(make_technical_chart(series, ind), width="stretch")
 
 
 if __name__ == "__main__":
