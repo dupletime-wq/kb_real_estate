@@ -13,13 +13,19 @@ ModelFn = Callable[[pd.DataFrame, np.ndarray, pd.DataFrame], np.ndarray]
 
 
 def _prepare(X_train: pd.DataFrame, X_pred: pd.DataFrame, clip: float = 5.0):
-    """Median-impute with train medians, standardize with train stats, winsorize to +/-clip sigma."""
-    med = X_train.median()
-    mu_src = X_train.fillna(med)
-    mu = mu_src.mean()
-    sd = mu_src.std().replace(0, 1.0).fillna(1.0)
-    a = ((mu_src - mu) / sd).clip(-clip, clip).to_numpy(dtype=np.float64)
-    b = ((X_pred.fillna(med) - mu) / sd).clip(-clip, clip).to_numpy(dtype=np.float64)
+    """Median-impute with train medians, standardize with train stats, winsorize to +/-clip sigma (numpy fast path)."""
+    a = X_train.to_numpy(dtype=np.float64, copy=True)
+    b = X_pred.to_numpy(dtype=np.float64, copy=True)
+    med = np.nanmedian(a, axis=0)
+    med = np.where(np.isfinite(med), med, 0.0)
+    for arr in (a, b):
+        rows, cols = np.where(np.isnan(arr))
+        arr[rows, cols] = med[cols]
+    mu = a.mean(axis=0)
+    sd = a.std(axis=0, ddof=1)
+    sd = np.where((sd == 0) | ~np.isfinite(sd), 1.0, sd)
+    a = np.clip((a - mu) / sd, -clip, clip)
+    b = np.clip((b - mu) / sd, -clip, clip)
     return np.nan_to_num(a), np.nan_to_num(b)
 
 

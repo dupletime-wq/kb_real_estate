@@ -49,15 +49,19 @@ def blend_model(horizon: int) -> M.ModelFn:
 
 @dataclass(frozen=True)
 class EngineFit:
-    """Everything needed to forecast any region in the panel, computed once per workbook."""
+    """Everything needed to forecast any region in the panel, computed once per workbook (kept small for caching)."""
 
-    fs: FeatureSet
+    log_price: pd.DataFrame  # wide log sale index
     anchors: tuple[int, ...]
     columns: list[str]
     predictions: dict[int, pd.DataFrame]  # per anchor: walk-forward + live-origin rows with y/pred/lo/hi
+    baselines: dict[int, pd.DataFrame]  # per anchor: rw / drift26 predictions aligned to `predictions`
+    contributions: dict[int, pd.DataFrame]  # per anchor: ridge-component contribution by feature group (rows = regions)
+    hierarchy: pd.DataFrame
     kb_fingerprint: str
     last_date: pd.Timestamp
     use_macro: bool
+    settings: dict = field(default_factory=dict)
 
 
 def fit_engine(
@@ -65,7 +69,7 @@ def fit_engine(
     macro_weekly: pd.DataFrame | None = None,
     anchors: tuple[int, ...] = ANCHORS,
     first_origin: str | None = None,
-    refit_every: int = 26,
+    refit_every: int = 39,
     eval_step: int = 2,
     use_macro: bool = False,
     progress: Callable[[int, int, str], None] | None = None,
@@ -75,21 +79,66 @@ def fit_engine(
     cols = model_columns(fs, use_macro)
     dates = fs.log_price.index
     if first_origin is None:
-        first_origin = str(max(pd.Timestamp("2014-01-06"), dates[-1] - pd.Timedelta(weeks=520)).date())
+        first_origin = str(max(pd.Timestamp("2014-01-06"), dates[-1] - pd.Timedelta(weeks=416)).date())
     vol = 0.5 * fs.X["vol52"] + 0.5 * fs.X["vol13"]
-    out: dict[int, pd.DataFrame] = {}
+    preds: dict[int, pd.DataFrame] = {}
+    bases: dict[int, pd.DataFrame] = {}
+    contrib: dict[int, pd.DataFrame] = {}
     for i, h in enumerate(anchors):
         if progress:
             progress(i, len(anchors), f"{h}주 예측 모델 학습·검증 중")
         cfg = WFConfig(horizon=h, first_origin=first_origin, eval_step=eval_step, refit_every=refit_every)
         pred = walk_forward(fs, cols, blend_model(h), cfg)
-        # make sure the most recent origin is present so live forecasts exist even if it is off the eval_step grid
         pred = _append_live_origin(fs, cols, blend_model(h), h, pred, cfg)
         lq, uq = CONFORMAL_LEVELS.get(h, (0.05, 0.95))
-        out[h] = conformal_quantiles(pred, scale_from_vol(vol, h), h, dates, lower_q=lq, upper_q=uq, window_weeks=260)
+        preds[h] = conformal_quantiles(pred, scale_from_vol(vol, h), h, dates, lower_q=lq, upper_q=uq, window_weeks=260)
+        bases[h] = pd.DataFrame(
+            {"rw": baseline_predictions(fs, h, "rw").reindex(pred.index), "drift26": baseline_predictions(fs, h, "drift26").reindex(pred.index)}
+        )
+        contrib[h] = _ridge_contributions(fs, cols, h)
     if progress:
         progress(len(anchors), len(anchors), "완료")
-    return EngineFit(fs, tuple(anchors), cols, out, kb.fingerprint, dates[-1], use_macro)
+    settings = {"first_origin": first_origin, "refit_every": refit_every, "eval_step": eval_step, "anchors": list(anchors)}
+    return EngineFit(fs.log_price, tuple(anchors), cols, preds, bases, contrib, kb.hierarchy, kb.fingerprint, dates[-1], use_macro, settings)
+
+
+def _feature_group_map(fs: FeatureSet, cols: list[str]) -> dict[str, str]:
+    out = {}
+    for group, names in fs.groups.items():
+        for n in names:
+            out[n] = group
+    for n in REL_FEATURES:
+        out[n] = "market"
+    return {c: out.get(c, "other") for c in cols}
+
+
+GROUP_LABELS = {"own": "자체 모멘텀·변동성", "own2": "자체 모멘텀(보조)", "sentiment": "KB 심리지표", "sent2": "KB 심리지표(보조)", "market": "지역 상대강도", "macro": "거시지표", "jeonse": "전세"}
+
+
+def _ridge_contributions(fs: FeatureSet, cols: list[str], h: int) -> pd.DataFrame:
+    """Interpretability: the ridge half of the blend, decomposed into (coefficient x standardized feature) by group,
+    at the live origin. Values are cumulative-return contributions in percentage points (relative to the mean forecast)."""
+    from sklearn.linear_model import Ridge
+
+    X, y = fs.X, make_targets(fs.log_price, h)
+    n = len(fs.log_price)
+    date_pos = pd.Series(np.arange(n), index=fs.log_price.index)
+    row_pos = date_pos.reindex(X.index.get_level_values("date")).to_numpy()
+    usable = X[["r52", "vol52"]].notna().all(axis=1).to_numpy()
+    tr = usable & y.notna().to_numpy() & (row_pos + h <= n - 1)
+    live = usable & (row_pos == n - 1)
+    if not live.any() or tr.sum() < 5000:
+        return pd.DataFrame()
+    from .models import _prepare
+
+    a, b = _prepare(X.loc[tr, cols], X.loc[live, cols])
+    yt = y.to_numpy()[tr]
+    model = Ridge(alpha=RIDGE_ALPHA.get(h, 100000.0)).fit(a, yt - yt.mean())
+    parts = b * model.coef_[None, :]
+    gmap = _feature_group_map(fs, cols)
+    frame = pd.DataFrame(parts, index=X.index[live].get_level_values("region"), columns=cols)
+    grouped = frame.T.groupby(pd.Series(gmap)).sum().T * 100.0
+    return grouped.rename(columns=GROUP_LABELS)
 
 
 def _append_live_origin(fs: FeatureSet, cols: list[str], model_fn: M.ModelFn, h: int, pred: pd.DataFrame, cfg: WFConfig) -> pd.DataFrame:
@@ -122,11 +171,10 @@ class RegionForecast:
 
 
 def forecast_region(fit: EngineFit, region: str, horizon: int) -> RegionForecast:
-    fs = fit.fs
-    if region not in fs.log_price.columns:
+    if region not in fit.log_price.columns:
         raise KeyError(region)
     last = fit.last_date
-    last_level = float(np.exp(fs.log_price[region].iloc[-1]))
+    last_level = float(np.exp(fit.log_price[region].iloc[-1]))
     rows = []
     for h in fit.anchors:
         df = fit.predictions[h]
@@ -164,34 +212,28 @@ def forecast_region(fit: EngineFit, region: str, horizon: int) -> RegionForecast
 
 def validation_summary(fit: EngineFit, regions: tuple[str, ...] | None, horizons: tuple[int, ...] = (13, 26, 52)) -> pd.DataFrame:
     """Walk-forward accuracy vs simple baselines on the realised part of the engine's own predictions."""
-    from .evaluation import score
-
     rows = []
     for h in horizons:
         if h not in fit.predictions:
             continue
-        df = fit.predictions[h]
+        df = fit.predictions[h].join(fit.baselines[h])
         if regions is not None:
             df = df[df.index.get_level_values("region").isin(regions)]
-        df = df.dropna(subset=["y", "pred"])
+        df = df.dropna(subset=["y", "pred", "drift26"])
         if df.empty:
             continue
-        rw = baseline_predictions(fit.fs, h, "rw")
-        dr = baseline_predictions(fit.fs, h, "drift26")
-        r = score(df[["y", "pred"]], "model", rw, dr, h, 2)
-        idx = df.index
-        e_dr = (dr.reindex(idx) - df["y"])
-        e_rw = (rw.reindex(idx) - df["y"])
-        inside = ((df["y"] >= df["lo"]) & (df["y"] <= df["hi"])).mean()
+        err = df["pred"] - df["y"]
+        e_dr = df["drift26"] - df["y"]
+        e_rw = df["rw"] - df["y"]
         rows.append(
             {
                 "horizon": h,
-                "n": r["n"],
-                "model_MAE_pp": r["MAE_pp"],
+                "n": int(len(df)),
+                "model_MAE_pp": float(err.abs().mean() * 100),
                 "drift26_MAE_pp": float(e_dr.abs().mean() * 100),
                 "randomwalk_MAE_pp": float(e_rw.abs().mean() * 100),
-                "skill_vs_drift26": r["skill_vs_drift26"],
-                "interval_coverage": float(inside),
+                "skill_vs_drift26": float(1 - (err**2).mean() / (e_dr**2).mean()),
+                "interval_coverage": float(((df["y"] >= df["lo"]) & (df["y"] <= df["hi"])).mean()),
                 "from": df.index.get_level_values("date").min(),
                 "to": df.index.get_level_values("date").max(),
             }
