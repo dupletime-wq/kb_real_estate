@@ -267,7 +267,7 @@ def _overlay_note(fit: EngineFit, region: str, horizon: int) -> None:
     st.info(
         f"**서울 기준금리 보정** · 최근 26주 기준금리 변화 {change_text} (자료 {info['rate_source']}, {info['rate_known_through']}까지) → "
         f"{anchor}주 예측 수익률에 **{adj:+.2f}%p** 반영 (계수 {info['slope']:.2f}, 부호는 '금리↑ → 수익률↓'로 제한). "
-        "과거 검증에서 서울 평균오차를 2~3% 줄였지만 통계적 유의성은 약합니다(단측 p≈0.12). '예측 근거' 탭과 '검증' 탭에서 보정 전후를 볼 수 있습니다."
+        "과거 검증에서 서울 평균오차를 2~3% 줄였지만 통계적 유의성은 약합니다(단측 p≈0.13). '예측 근거' 탭과 '검증' 탭에서 보정 전후를 볼 수 있습니다."
     )
 
 
@@ -296,18 +296,18 @@ def _validation_tab(fit: EngineFit, kb: KBPanel, region: str, horizon: int) -> N
     if fit.overlay:
         seoul_rows = table[table["대상"] == "서울 28개 지역 평균"].copy()
         if not seoul_rows.empty:
-            seoul_rows["보정 효과(%)"] = (seoul_rows["model_MAE_pp"] / seoul_rows["raw_model_MAE_pp"] - 1) * 100
+            seoul_rows["보정 효과(%)"] = (seoul_rows["모델 평균오차(%p)"] / seoul_rows["raw_model_MAE_pp"] - 1) * 100
             st.markdown("**서울 기준금리 보정 전/후 (서울 28개 지역 평균 오차, %p)**")
             st.dataframe(
-                seoul_rows[["예측 기간(주)", "raw_model_MAE_pp", "model_MAE_pp", "보정 효과(%)"]].rename(
-                    columns={"raw_model_MAE_pp": "보정 전", "model_MAE_pp": "보정 후"}
+                seoul_rows[["예측 기간(주)", "raw_model_MAE_pp", "모델 평균오차(%p)", "보정 효과(%)"]].rename(
+                    columns={"raw_model_MAE_pp": "보정 전", "모델 평균오차(%p)": "보정 후"}
                 ),
                 width="stretch", hide_index=True,
                 column_config={c: st.column_config.NumberColumn(format="%.3f") for c in ("보정 전", "보정 후", "보정 효과(%)")},
             )
             st.caption(
                 "보정은 서울 시리즈의 과거 검증 잔차를 '기준금리 26주 변화'에 회귀한 단일 계수(≤0)로 만듭니다. 각 시점에서는 그때까지 라벨이 확정된 잔차만 씁니다. "
-                "개선은 금리 인상기(2022–23)에 집중되어 있고 통계적으로는 단측 p≈0.12 수준이라, 경제적 판단(서울의 유동성 민감도)에 근거해 적용한 것입니다."
+                "개선은 금리 인상기(2022–23)에 집중되어 있고 통계적으로는 단측 p≈0.13 수준이라, 경제적 판단(서울의 유동성 민감도)에 근거해 적용한 것입니다."
             )
     first, last = table["from"].min().date(), table["to"].max().date()
     st.caption(
@@ -395,7 +395,7 @@ def main() -> None:
         seoul_overlay = st.checkbox(
             "서울 기준금리 보정", value=True, disabled=target != "sale",
             help="서울은 유동성에 더 민감하다는 판단으로, 풀링 예측 위에 서울 시리즈에만 '기준금리 26주 변화'에 대한 보정(부호 제약)을 더합니다. "
-                 "과거 검증에서 오차가 소폭 줄었지만(단측 p≈0.12) 통계적으로 확정된 수준은 아닙니다. 매매지수에만 적용됩니다.",
+                 "과거 검증에서 오차가 소폭 줄었지만(단측 p≈0.13) 통계적으로 확정된 수준은 아닙니다. 매매지수에만 적용됩니다.",
         )
         with st.expander("고급 (실험)"):
             use_macro = st.checkbox(
