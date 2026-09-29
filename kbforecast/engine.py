@@ -19,9 +19,10 @@ from . import models as M
 from .evaluation import WFConfig, baseline_predictions, walk_forward
 from .features import FeatureSet, build_features, make_targets
 from .intervals import conformal_quantiles, scale_from_vol
-from .kb_panel import KBPanel
+from .kb_panel import KBPanel, seoul_region_keys
+from .overlay import RateSeries, apply_seoul_rate_overlay, rate_change_weekly
 
-ENGINE_VERSION = "v1"  # bump when model/feature/interval settings change (invalidates on-disk caches)
+ENGINE_VERSION = "v2"  # bump when model/feature/interval settings change (invalidates on-disk caches)
 ANCHORS = (4, 8, 13, 20, 26, 39, 52)
 REL_FEATURES = ("rel13", "rel26", "cs_rank13", "cs_rank26")
 # validated per-horizon settings: ridge alpha (stronger shrinkage for longer horizons), conformal levels for ~80% coverage
@@ -63,6 +64,7 @@ class EngineFit:
     last_date: pd.Timestamp
     use_macro: bool
     settings: dict = field(default_factory=dict)
+    overlay: dict = field(default_factory=dict)  # per anchor: slope / rate change / rate-data source (empty if not applied)
 
 
 def fit_engine(
@@ -73,14 +75,21 @@ def fit_engine(
     refit_every: int = 39,
     eval_step: int = 2,
     use_macro: bool = False,
+    rate: RateSeries | None = None,
     progress: Callable[[int, int, str], None] | None = None,
 ) -> EngineFit:
-    """Walk-forward fit at every anchor horizon (also yields the live-origin forecasts and calibrated intervals)."""
+    """Walk-forward fit at every anchor horizon (also yields the live-origin forecasts and calibrated intervals).
+
+    If `rate` is given, Seoul series get the policy-rate overlay (see overlay.py) before intervals are calibrated.
+    """
     fs = build_features(kb, macro_weekly if use_macro else None)
     cols = model_columns(fs, use_macro)
     dates = fs.log_price.index
     if first_origin is None:
-        first_origin = str(max(pd.Timestamp("2014-01-06"), dates[-1] - pd.Timedelta(weeks=416)).date())
+        first_origin = "2014-01-06"  # the validated walk-forward start; the overlay slope needs the 2022-23 tightening in-sample
+    seoul = seoul_region_keys(kb.hierarchy) & set(fs.log_price.columns)
+    z_rate = rate_change_weekly(rate, dates) if rate is not None else None
+    overlay_info: dict = {}
     vol = 0.5 * fs.X["vol52"] + 0.5 * fs.X["vol13"]
     preds: dict[int, pd.DataFrame] = {}
     bases: dict[int, pd.DataFrame] = {}
@@ -91,16 +100,28 @@ def fit_engine(
         cfg = WFConfig(horizon=h, first_origin=first_origin, eval_step=eval_step, refit_every=refit_every)
         pred = walk_forward(fs, cols, blend_model(h), cfg)
         pred = _append_live_origin(fs, cols, blend_model(h), h, pred, cfg)
+        if z_rate is not None and seoul:
+            pred, slopes = apply_seoul_rate_overlay(pred, z_rate, h, dates, seoul)
+            overlay_info[h] = {
+                "slope": float(slopes.iloc[-1]) if len(slopes) else 0.0,
+                "rate_change_26w": float(z_rate.iloc[-1]) if np.isfinite(z_rate.iloc[-1]) else float("nan"),
+                "rate_known_through": str(rate.known_through.date()),
+                "rate_source": rate.source,
+            }
         lq, uq = CONFORMAL_LEVELS.get(h, (0.05, 0.95))
         preds[h] = conformal_quantiles(pred, scale_from_vol(vol, h), h, dates, lower_q=lq, upper_q=uq, window_weeks=260)
         bases[h] = pd.DataFrame(
             {"rw": baseline_predictions(fs, h, "rw").reindex(pred.index), "drift26": baseline_predictions(fs, h, "drift26").reindex(pred.index)}
         )
         contrib[h] = _ridge_contributions(fs, cols, h)
+        if h in overlay_info and not contrib[h].empty:
+            live = preds[h].xs(dates[-1], level="date")["overlay"].reindex(contrib[h].index).fillna(0.0) * 100.0
+            contrib[h]["서울 금리 보정"] = live
     if progress:
         progress(len(anchors), len(anchors), "완료")
     settings = {"first_origin": first_origin, "refit_every": refit_every, "eval_step": eval_step, "anchors": list(anchors)}
-    return EngineFit(fs.log_price, tuple(anchors), cols, preds, bases, contrib, kb.hierarchy, kb.fingerprint, dates[-1], use_macro, settings)
+    settings["seoul_rate_overlay"] = bool(overlay_info)
+    return EngineFit(fs.log_price, tuple(anchors), cols, preds, bases, contrib, kb.hierarchy, kb.fingerprint, dates[-1], use_macro, settings, overlay_info)
 
 
 def _feature_group_map(fs: FeatureSet, cols: list[str]) -> dict[str, str]:
@@ -232,10 +253,12 @@ def validation_summary(fit: EngineFit, regions: tuple[str, ...] | None, horizons
         err = df["pred"] - df["y"]
         e_dr = df["drift26"] - df["y"]
         e_rw = df["rw"] - df["y"]
+        raw_mae = float((df["pred_raw"] - df["y"]).abs().mean() * 100) if "pred_raw" in df else float("nan")
         rows.append(
             {
                 "horizon": h,
                 "n": int(len(df)),
+                "raw_model_MAE_pp": raw_mae,  # before the Seoul policy-rate overlay (equal to model_MAE_pp if none applied)
                 "model_MAE_pp": float(err.abs().mean() * 100),
                 "drift26_MAE_pp": float(e_dr.abs().mean() * 100),
                 "randomwalk_MAE_pp": float(e_rw.abs().mean() * 100),

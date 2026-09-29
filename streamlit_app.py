@@ -12,13 +12,13 @@ import streamlit as st
 
 from kbforecast.engine import ENGINE_VERSION, EngineFit, fit_engine, forecast_region, validation_summary
 from kbforecast.indicators import IndicatorResult, evaluate_indicators
-from kbforecast.kb_panel import KBPanel, parse_kb_panel
+from kbforecast.kb_panel import KBPanel, parse_kb_panel, seoul_region_keys
 from kbforecast.macro import ecos_api_key, load_macro, macro_weekly
+from kbforecast.overlay import RateSeries, load_base_rate
 
 APP_TITLE = "KB 부동산 시세 예측 대시보드"
 CACHE_DIR = Path(".cache")
 HORIZONS = (13, 26, 52)
-SEOUL_KEYS_HINT = ("서울특별시", "강북14개구", "강남11개구")
 PROVINCE_ORDER = (
     "서울특별시", "경기도", "인천광역시", "부산광역시", "대구광역시", "대전광역시", "울산광역시", "(구)광주광역시",
     "전남광주통합특별시", "세종특별자치시", "강원특별자치도", "충청북도", "충청남도", "전북특별자치도",
@@ -32,8 +32,15 @@ def load_panel(file_bytes: bytes) -> KBPanel:
     return parse_kb_panel(file_bytes)
 
 
-def _engine_cache_path(fingerprint: str, target: str, use_macro: bool) -> Path:
-    return CACHE_DIR / f"engine_{fingerprint[:12]}_{target}_{'macro' if use_macro else 'base'}_{ENGINE_VERSION}.pkl"
+@st.cache_data(show_spinner=False, ttl=24 * 3600)
+def load_rate(api_key: str) -> RateSeries:
+    return load_base_rate(api_key or None)
+
+
+def _engine_cache_path(fingerprint: str, target: str, use_macro: bool, rate: RateSeries | None) -> Path:
+    macro_tag = "macro" if use_macro else "base"
+    rate_tag = f"rate{rate.known_through:%Y%m%d}" if rate is not None else "norate"
+    return CACHE_DIR / f"engine_{fingerprint[:12]}_{target}_{macro_tag}_{rate_tag}_{ENGINE_VERSION}.pkl"
 
 
 def _load_engine_from_disk(path: Path) -> EngineFit | None:
@@ -53,14 +60,16 @@ def _save_engine_to_disk(path: Path, fit: EngineFit) -> None:
         pass  # read-only filesystems just skip the persistent cache
 
 
-def get_engine(kb: KBPanel, target: str, use_macro: bool, api_key: str) -> tuple[EngineFit | None, list[str]]:
+def get_engine(
+    kb: KBPanel, target: str, use_macro: bool, api_key: str, rate: RateSeries | None = None
+) -> tuple[EngineFit | None, list[str]]:
     """Fit (or reuse) the pooled engine for this workbook. Returns (fit, warnings)."""
-    key = (kb.fingerprint, target, use_macro)
+    key = (kb.fingerprint, target, use_macro, rate.known_through if rate is not None else None)
     store = st.session_state.setdefault("engine_fits", {})
     if key in store:
         return store[key], []
     warnings: list[str] = []
-    path = _engine_cache_path(kb.fingerprint, target, use_macro)
+    path = _engine_cache_path(kb.fingerprint, target, use_macro, rate)
     fit = _load_engine_from_disk(path)
     if fit is None:
         model_kb = kb if target == "sale" else kb.swap_target()
@@ -72,13 +81,13 @@ def get_engine(kb: KBPanel, target: str, use_macro: bool, api_key: str) -> tuple
                 macro_w = macro_weekly(macro, model_kb.sale.index)
             else:
                 use_macro = False
-        with st.status("전국 패널 예측 엔진을 학습하고 검증하는 중입니다 (파일당 최초 1회, 약 2~3분).", expanded=True) as status:
+        with st.status("전국 패널 예측 엔진을 학습하고 검증하는 중입니다 (파일당 최초 1회, 약 3~4분).", expanded=True) as status:
             bar = st.progress(0.0, text="준비 중")
 
             def progress(done: int, total: int, message: str) -> None:
                 bar.progress(min(1.0, done / max(total, 1)), text=message)
 
-            fit = fit_engine(model_kb, macro_w, use_macro=use_macro, progress=progress)
+            fit = fit_engine(model_kb, macro_w, use_macro=use_macro, rate=rate, progress=progress)
             status.update(label="예측 엔진 준비 완료", state="complete", expanded=False)
         _save_engine_to_disk(path, fit)
     store[key] = fit
@@ -240,8 +249,30 @@ def _style() -> None:
 
 
 # ----------------------------------------------------------------------------- tabs
+def _overlay_note(fit: EngineFit, region: str, horizon: int) -> None:
+    """Explain the Seoul policy-rate adjustment for the selected region's forecast (only shown when it applies)."""
+    if not fit.overlay:
+        return
+    anchor = min(fit.anchors, key=lambda a: abs(a - horizon))
+    info = fit.overlay.get(anchor)
+    if info is None or region not in seoul_region_keys(fit.hierarchy):
+        return
+    try:
+        live = fit.predictions[anchor].xs(fit.last_date, level="date").loc[region]
+    except KeyError:
+        return
+    adj = float(live.get("overlay", 0.0)) * 100
+    change = info["rate_change_26w"]
+    change_text = "확인 불가" if pd.isna(change) else f"{change:+.2f}%p"
+    st.info(
+        f"**서울 기준금리 보정** · 최근 26주 기준금리 변화 {change_text} (자료 {info['rate_source']}, {info['rate_known_through']}까지) → "
+        f"{anchor}주 예측 수익률에 **{adj:+.2f}%p** 반영 (계수 {info['slope']:.2f}, 부호는 '금리↑ → 수익률↓'로 제한). "
+        "과거 검증에서 서울 평균오차를 2~3% 줄였지만 통계적 유의성은 약합니다(단측 p≈0.12). '예측 근거' 탭과 '검증' 탭에서 보정 전후를 볼 수 있습니다."
+    )
+
+
 def _validation_tab(fit: EngineFit, kb: KBPanel, region: str, horizon: int) -> None:
-    seoul = tuple(k for k in kb.hierarchy.index if k in SEOUL_KEYS_HINT or (kb.hierarchy.loc[k, "province"] == "서울특별시" and kb.hierarchy.loc[k, "level"] == "gu"))
+    seoul = tuple(sorted(seoul_region_keys(kb.hierarchy)))
     frames = []
     for label, regions in ((f"{region} (선택 지역)", (region,)), ("서울 28개 지역 평균", seoul), ("전국 패널 전체", None)):
         v = validation_summary(fit, regions, horizons=tuple(h for h in HORIZONS if h in fit.anchors))
@@ -262,6 +293,22 @@ def _validation_tab(fit: EngineFit, kb: KBPanel, region: str, horizon: int) -> N
         table[cols], width="stretch", hide_index=True,
         column_config={c: st.column_config.NumberColumn(format="%.2f") for c in cols[3:]} | {"구간 적중률": st.column_config.NumberColumn(format="%.1f%%")},
     )
+    if fit.overlay:
+        seoul_rows = table[table["대상"] == "서울 28개 지역 평균"].copy()
+        if not seoul_rows.empty:
+            seoul_rows["보정 효과(%)"] = (seoul_rows["model_MAE_pp"] / seoul_rows["raw_model_MAE_pp"] - 1) * 100
+            st.markdown("**서울 기준금리 보정 전/후 (서울 28개 지역 평균 오차, %p)**")
+            st.dataframe(
+                seoul_rows[["예측 기간(주)", "raw_model_MAE_pp", "model_MAE_pp", "보정 효과(%)"]].rename(
+                    columns={"raw_model_MAE_pp": "보정 전", "model_MAE_pp": "보정 후"}
+                ),
+                width="stretch", hide_index=True,
+                column_config={c: st.column_config.NumberColumn(format="%.3f") for c in ("보정 전", "보정 후", "보정 효과(%)")},
+            )
+            st.caption(
+                "보정은 서울 시리즈의 과거 검증 잔차를 '기준금리 26주 변화'에 회귀한 단일 계수(≤0)로 만듭니다. 각 시점에서는 그때까지 라벨이 확정된 잔차만 씁니다. "
+                "개선은 금리 인상기(2022–23)에 집중되어 있고 통계적으로는 단측 p≈0.12 수준이라, 경제적 판단(서울의 유동성 민감도)에 근거해 적용한 것입니다."
+            )
     first, last = table["from"].min().date(), table["to"].max().date()
     st.caption(
         f"매 시점마다 그 시점까지의 데이터만으로 다시 학습해 미래를 예측하고 실제와 비교한 결과입니다 (walk-forward, {first} ~ {last}). "
@@ -345,6 +392,11 @@ def main() -> None:
         horizon = st.selectbox("예측 기간", list(HORIZONS), index=1, format_func=lambda v: f"{v}주")
         group = st.selectbox("권역", list(groups), index=list(groups).index("서울특별시") if "서울특별시" in groups else 0)
         region = st.selectbox("지역", groups[group], index=0)
+        seoul_overlay = st.checkbox(
+            "서울 기준금리 보정", value=True, disabled=target != "sale",
+            help="서울은 유동성에 더 민감하다는 판단으로, 풀링 예측 위에 서울 시리즈에만 '기준금리 26주 변화'에 대한 보정(부호 제약)을 더합니다. "
+                 "과거 검증에서 오차가 소폭 줄었지만(단측 p≈0.12) 통계적으로 확정된 수준은 아닙니다. 매매지수에만 적용됩니다.",
+        )
         with st.expander("고급 (실험)"):
             use_macro = st.checkbox(
                 "한국은행 ECOS 거시지표 피처 포함", value=False,
@@ -352,7 +404,13 @@ def main() -> None:
             )
             api_key = st.text_input("ECOS 인증키", value=ecos_api_key(), type="password") if use_macro else ""
 
-    fit, fit_warnings = get_engine(kb, target, use_macro and bool(api_key), api_key)
+    rate = load_rate(api_key or ecos_api_key()) if (seoul_overlay and target == "sale") else None
+    if rate is not None and rate.known_through < kb.last_date:
+        st.sidebar.warning(
+            f"기준금리 자료가 {rate.known_through.date()}까지만 반영되어 있어 그 이후 금리 변경은 보정에 들어가지 않습니다 "
+            "(ECOS 인증키를 넣으면 최신 자료로 갱신됩니다)."
+        )
+    fit, fit_warnings = get_engine(kb, target, use_macro and bool(api_key), api_key, rate)
     for message in fit_warnings:
         st.sidebar.warning(message)
 
@@ -390,6 +448,7 @@ def main() -> None:
             cols[1].metric("예측구간 (하단 ~ 상단)", f"{_format_value(end['p10'], 1)} ~ {_format_value(end['p90'], 1)}")
             cols[2].metric("기준일", str(fc.origin.date()))
             st.plotly_chart(make_forecast_chart(series, fc.path, f"KB {target_label}"), width="stretch")
+            _overlay_note(fit, region, horizon)
             with st.expander("기간별 예측 수익률", expanded=False):
                 st.dataframe(
                     fc.anchor_table.rename(columns={"h": "기간(주)", "pred_pct": "예측 수익률(%)", "lo_pct": "하단(%)", "hi_pct": "상단(%)"}),
