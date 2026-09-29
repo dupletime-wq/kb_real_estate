@@ -21,6 +21,7 @@ from .features import FeatureSet, build_features, make_targets
 from .intervals import conformal_quantiles, scale_from_vol
 from .kb_panel import KBPanel
 
+ENGINE_VERSION = "v1"  # bump when model/feature/interval settings change (invalidates on-disk caches)
 ANCHORS = (4, 8, 13, 20, 26, 39, 52)
 REL_FEATURES = ("rel13", "rel26", "cs_rank13", "cs_rank26")
 # validated per-horizon settings: ridge alpha (stronger shrinkage for longer horizons), conformal levels for ~80% coverage
@@ -210,6 +211,12 @@ def forecast_region(fit: EngineFit, region: str, horizon: int) -> RegionForecast
     return RegionForecast(region, horizon, last, last_level, path, tbl[["h", "pred_pct", "lo_pct", "hi_pct"]])
 
 
+def _coverage(df: pd.DataFrame) -> float:
+    """Share of realised outcomes inside [lo, hi], counting only rows that actually have a calibrated interval."""
+    d = df.dropna(subset=["lo", "hi", "y"])
+    return float(((d["y"] >= d["lo"]) & (d["y"] <= d["hi"])).mean()) if len(d) else float("nan")
+
+
 def validation_summary(fit: EngineFit, regions: tuple[str, ...] | None, horizons: tuple[int, ...] = (13, 26, 52)) -> pd.DataFrame:
     """Walk-forward accuracy vs simple baselines on the realised part of the engine's own predictions."""
     rows = []
@@ -233,7 +240,7 @@ def validation_summary(fit: EngineFit, regions: tuple[str, ...] | None, horizons
                 "drift26_MAE_pp": float(e_dr.abs().mean() * 100),
                 "randomwalk_MAE_pp": float(e_rw.abs().mean() * 100),
                 "skill_vs_drift26": float(1 - (err**2).mean() / (e_dr**2).mean()),
-                "interval_coverage": float(((df["y"] >= df["lo"]) & (df["y"] <= df["hi"])).mean()),
+                "interval_coverage": _coverage(df),
                 "from": df.index.get_level_values("date").min(),
                 "to": df.index.get_level_values("date").max(),
             }

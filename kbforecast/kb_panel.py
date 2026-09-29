@@ -50,6 +50,10 @@ class KBPanel:
     def last_date(self) -> pd.Timestamp:
         return self.sale.index.max()
 
+    def swap_target(self) -> "KBPanel":
+        """View of the panel with sale and jeonse swapped, so the same engine can forecast the jeonse index."""
+        return KBPanel(self.jeonse, self.sale, self.sentiment, self.hierarchy, self.fingerprint, self.warnings)
+
 
 def _to_date(text: str) -> pd.Timestamp | None:
     if not text:
