@@ -14,7 +14,7 @@ from .kb_panel import KBPanel
 
 MARKET_REFS = ("서울특별시", "수도권", "경기도", "전국", "6개광역시")
 INDICATORS = ("buyer", "sale_txn", "jeonse_supply", "jeonse_txn")
-GROUP_ORDER = ("own", "market", "jeonse", "sentiment", "macro")
+GROUP_ORDER = ("own", "own2", "market", "jeonse", "sentiment", "sent2", "macro")
 
 
 @dataclass(frozen=True)
@@ -137,6 +137,12 @@ def build_features(kb: KBPanel, macro_w: pd.DataFrame | None = None) -> FeatureS
     add("own", "up52", L - L.rolling(52, min_periods=26).min())
     add("own", "gap26", L - L.rolling(26, min_periods=13).mean())
 
+    for k in (2, 6, 39):
+        add("own2", f"r{k}", ret(L, k))
+    add("own2", "dd26", L - L.rolling(26, min_periods=13).max())
+    add("own2", "acc8", r[8] - (L.shift(8) - L.shift(16)))
+    add("own2", "r4_over_vol", r[4] / (vol13 * 2.0).replace(0, np.nan))
+
     ref = _reference_map(kb)
     for name in MARKET_REFS:
         if name in cols:
@@ -170,6 +176,15 @@ def build_features(kb: KBPanel, macro_w: pd.DataFrame | None = None) -> FeatureS
         mean52 = wide.rolling(52, min_periods=26).mean()
         std52 = wide.rolling(52, min_periods=26).std().replace(0, np.nan)
         add("sentiment", f"{indicator}_z52", (wide - mean52) / std52)
+        add("sent2", f"{indicator}_d8", wide - wide.shift(8))
+        add("sent2", f"{indicator}_d26", wide - wide.shift(26))
+        add("sent2", f"{indicator}_ma4dev", wide - wide.rolling(4, min_periods=2).mean())
+        add("sent2", f"{indicator}_dev156", wide - wide.rolling(156, min_periods=78).mean())
+        # region sentiment relative to its parent province (regional divergence from the wider market)
+        parent_scope = kb.hierarchy["province"].reindex(cols).map(lambda v: {"제주도": "제주특별자치도"}.get(v, v))
+        prov = pd.DataFrame({c: kb.sentiment[indicator][ps].reindex(L.index) if ps in kb.sentiment[indicator].columns else np.nan
+                             for c, ps in parent_scope.items()}, index=L.index)
+        add("sent2", f"{indicator}_vs_prov_d13", (wide - wide.shift(13)) - (prov - prov.shift(13)))
 
     if macro_w is not None and not macro_w.empty:
         for name, series in _macro_features(macro_w.reindex(L.index)).items():
