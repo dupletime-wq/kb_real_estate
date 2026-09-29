@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+import hashlib
 import pickle
+import time
 from typing import Any
 
 import numpy as np
@@ -11,6 +13,7 @@ from plotly.subplots import make_subplots
 import streamlit as st
 
 from kbforecast.engine import ENGINE_VERSION, EngineFit, fit_engine, forecast_region, validation_summary
+from kbforecast.hub import HubData, HubReport, extend_kb_panel, fetch_hub
 from kbforecast.indicators import IndicatorResult, evaluate_indicators
 from kbforecast.kb_panel import KBPanel, parse_kb_panel, seoul_region_keys
 from kbforecast.macro import ecos_api_key, load_macro, macro_weekly
@@ -18,6 +21,7 @@ from kbforecast.overlay import RateSeries, load_base_rate, scenario_adjustments
 
 APP_TITLE = "KB 부동산 시세 예측 대시보드"
 CACHE_DIR = Path(".cache")
+HUB_TTL_SECONDS = 6 * 3600
 HORIZONS = (13, 26, 52)
 PROVINCE_ORDER = (
     "서울특별시", "경기도", "인천광역시", "부산광역시", "대구광역시", "대전광역시", "울산광역시", "(구)광주광역시",
@@ -37,10 +41,44 @@ def load_rate(api_key: str) -> RateSeries:
     return load_base_rate(api_key or None)
 
 
+def _hub_data(kb: KBPanel) -> HubData:
+    """Hub download (about 1~2 minutes) cached on disk for a few hours."""
+    path = CACHE_DIR / "hub_raw.pkl"
+    try:
+        if path.exists() and time.time() - path.stat().st_mtime < HUB_TTL_SECONDS:
+            return pickle.loads(path.read_bytes())
+    except Exception:
+        pass
+    hub = fetch_hub(kb.hierarchy)
+    try:
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(pickle.dumps(hub))
+    except Exception:
+        pass
+    return hub
+
+
+def extend_with_hub(kb: KBPanel) -> tuple[KBPanel, HubReport | None, str | None]:
+    """Append the weeks KB 데이터허브 has published after the workbook. Never raises: on any problem the workbook is used as is."""
+    store = st.session_state.setdefault("hub_ext", {})
+    if kb.fingerprint in store:
+        return store[kb.fingerprint]
+    try:
+        with st.status("KB 데이터허브에서 워크북 이후의 최신 주간 자료를 확인하는 중입니다 (1~2분, 이후 캐시).", expanded=False) as status:
+            extended, report = extend_kb_panel(kb, _hub_data(kb))
+            status.update(label=report.message, state="complete" if report.applied else "error")
+        result: tuple[KBPanel, HubReport | None, str | None] = (extended, report, None if report.applied else report.message)
+    except Exception as exc:  # noqa: BLE001 - the workbook alone is always a valid input
+        result = (kb, None, f"KB 데이터허브 자료를 가져오지 못해 업로드한 파일만 사용합니다 ({exc})")
+    store[kb.fingerprint] = result
+    return result
+
+
 def _engine_cache_path(fingerprint: str, target: str, use_macro: bool, rate: RateSeries | None) -> Path:
     macro_tag = "macro" if use_macro else "base"
     rate_tag = f"rate{rate.known_through:%Y%m%d}" if rate is not None else "norate"
-    return CACHE_DIR / f"engine_{fingerprint[:12]}_{target}_{macro_tag}_{rate_tag}_{ENGINE_VERSION}.pkl"
+    tag = hashlib.sha1(fingerprint.encode()).hexdigest()[:12]  # includes the hub extension date
+    return CACHE_DIR / f"engine_{tag}_{target}_{macro_tag}_{rate_tag}_{ENGINE_VERSION}.pkl"
 
 
 def _load_engine_from_disk(path: Path) -> EngineFit | None:
@@ -407,6 +445,11 @@ def main() -> None:
     with st.sidebar:
         st.header("입력")
         uploaded = st.file_uploader("KB 주간시계열 XLSX 업로드", type=["xlsx"])
+        use_hub = st.checkbox(
+            "KB 데이터허브 최신 주간 자료 보강", value=True,
+            help="업로드한 파일 이후에 KB 데이터허브(data.kbland.kr)가 공개한 주간 가격지수·심리지표를 붙여 예측 기준일을 앞당깁니다. "
+                 "지역별로 워크북과 값이 정확히 일치하는 경우에만 사용하며, 실패하면 업로드한 파일만 씁니다. 비공식 공개 API를 사용합니다.",
+        )
         sample_path = None
         use_sample = False
         if uploaded is None:
@@ -427,6 +470,13 @@ def main() -> None:
         return
     for message in kb.warnings:
         st.warning(message)
+    hub_report, hub_problem = None, None
+    if use_hub:
+        kb, hub_report, hub_problem = extend_with_hub(kb)
+    if hub_report is not None and hub_report.applied:
+        st.info(hub_report.message + f" · 원본 워크북 기준일 {(hub_report.new_dates[0] - pd.Timedelta(weeks=1)).date()}")
+    elif hub_problem:
+        st.caption(f"KB 데이터허브 보강 미적용: {hub_problem}")
 
     groups = region_groups(kb)
     with st.sidebar:
