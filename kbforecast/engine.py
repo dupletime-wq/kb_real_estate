@@ -22,8 +22,9 @@ from .intervals import conformal_quantiles, scale_from_vol
 from .kb_panel import KBPanel, seoul_region_keys
 from .overlay import RateSeries, apply_seoul_rate_overlay, rate_change_weekly
 
-ENGINE_VERSION = "v3"  # bump when model/feature/interval settings change (invalidates on-disk caches)
-ANCHORS = (4, 8, 13, 20, 26, 39, 52)
+ENGINE_VERSION = "v4"  # bump when model/feature/interval settings change (invalidates on-disk caches)
+ANCHORS = (4, 8, 13, 20, 26, 39, 52, 78, 104)
+LONG_HORIZON = 78  # from here on the tree model is dropped: the ridge alone beats the blend (Seoul MAE 6.18 vs 6.36 at 78w, 7.88 vs 8.07 at 104w)
 REL_FEATURES = ("rel13", "rel26", "cs_rank13", "cs_rank26")
 # Features that add nothing out of sample (kept in FeatureSet, left out of the models). Found by dropping each feature family in the
 # pooled walk-forward (13/26/52 weeks, all regions and Seoul) and then dropping the neutral ones together: 60 -> 33 features with
@@ -38,8 +39,8 @@ PRUNED_FEATURES = frozenset({
     "jeonse_txn_lvl", "jeonse_txn_d4", "jeonse_txn_d13", "jeonse_txn_d8", "jeonse_txn_d26", "jeonse_txn_ma4dev", "jeonse_txn_dev156",  # jeonse trading activity
 })
 # validated per-horizon settings: ridge alpha (stronger shrinkage for longer horizons), conformal levels for ~80% coverage
-RIDGE_ALPHA = {4: 10000.0, 8: 30000.0, 13: 30000.0, 20: 100000.0, 26: 100000.0, 39: 100000.0, 52: 100000.0}
-CONFORMAL_LEVELS = {4: (0.07, 0.93), 8: (0.07, 0.93), 13: (0.07, 0.93), 20: (0.05, 0.95), 26: (0.05, 0.95), 39: (0.05, 0.95), 52: (0.05, 0.95)}
+RIDGE_ALPHA = {4: 10000.0, 8: 30000.0, 13: 30000.0, 20: 100000.0, 26: 100000.0, 39: 100000.0, 52: 100000.0, 78: 100000.0, 104: 100000.0}
+CONFORMAL_LEVELS = {4: (0.07, 0.93), 8: (0.07, 0.93), 13: (0.07, 0.93), 20: (0.05, 0.95), 26: (0.05, 0.95), 39: (0.05, 0.95), 52: (0.05, 0.95), 78: (0.05, 0.95), 104: (0.05, 0.95)}
 HGB_KW = {
     "default": dict(),
     26: dict(max_iter=300, learning_rate=0.03, max_leaf_nodes=6, min_samples_leaf=400, l2=10.0),
@@ -57,6 +58,8 @@ def model_columns(fs: FeatureSet, use_macro: bool = False) -> list[str]:
 
 def blend_model(horizon: int) -> M.ModelFn:
     alpha = RIDGE_ALPHA.get(horizon, 100000.0)
+    if horizon >= LONG_HORIZON:
+        return M.ridge_model(alpha)
     hgb_kw = HGB_KW.get(horizon, HGB_KW["default"])
     return M.blend([M.ridge_model(alpha), M.hgb_model(**hgb_kw)])
 

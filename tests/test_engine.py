@@ -100,3 +100,17 @@ def test_pruned_features_are_left_out_of_the_models_but_kept_for_intervals():
     assert not set(cols) & PRUNED_FEATURES
     assert {"vol13", "vol52"} <= set(fs.X.columns)  # still computed: they scale the prediction intervals
     assert {"r1", "r4", "r8", "r39", "rel13", "rel26"} <= set(cols)  # the families whose removal hurt stay
+
+
+def test_long_horizons_use_the_ridge_alone():
+    from kbforecast.engine import ANCHORS, LONG_HORIZON, RIDGE_ALPHA, blend_model
+
+    assert 78 in ANCHORS and 104 in ANCHORS and max(ANCHORS) == 104
+    rng = np.random.default_rng(0)
+    X = pd.DataFrame(rng.normal(size=(300, 4)), columns=list("abcd"))
+    y = X["a"].to_numpy() * 0.01 + rng.normal(0, 0.01, 300)
+    Xp = pd.DataFrame(rng.normal(size=(20, 4)), columns=list("abcd"))
+    long_pred = blend_model(LONG_HORIZON)(X, y, Xp)
+    ridge_pred = M.ridge_model(RIDGE_ALPHA[LONG_HORIZON])(X, y, Xp)
+    np.testing.assert_allclose(long_pred, ridge_pred)
+    assert not np.allclose(blend_model(26)(X, y, Xp), M.ridge_model(RIDGE_ALPHA[26])(X, y, Xp))  # shorter horizons still blend in the trees

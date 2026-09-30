@@ -22,7 +22,7 @@ from kbforecast.overlay import RateSeries, load_base_rate, scenario_adjustments
 APP_TITLE = "KB 부동산 시세 예측 대시보드"
 CACHE_DIR = Path(".cache")
 HUB_TTL_SECONDS = 6 * 3600
-HORIZONS = (13, 26, 52)
+HORIZONS = (13, 26, 52, 104)
 PROVINCE_ORDER = (
     "서울특별시", "경기도", "인천광역시", "부산광역시", "대구광역시", "대전광역시", "울산광역시", "(구)광주광역시",
     "전남광주통합특별시", "세종특별자치시", "강원특별자치도", "충청북도", "충청남도", "전북특별자치도",
@@ -435,7 +435,7 @@ def main() -> None:
     st.markdown(
         """
         <div class="app-note">
-        KB 주간시계열 XLSX의 전국 지역 전체를 하나의 패널로 학습해 주간 가격지수의 13·26·52주 뒤 변화를 예측합니다.
+        KB 주간시계열 XLSX의 전국 지역 전체를 하나의 패널로 학습해 주간 가격지수의 13·26·52·104주 뒤 변화를 예측합니다.
         모든 성능 수치는 과거 시점마다 재학습해 미래를 맞혀 본 walk-forward 검증 결과이며, 투자 권유가 아닙니다.
         </div>
         """,
@@ -542,6 +542,11 @@ def main() -> None:
             cols[1].metric("예측구간 (하단 ~ 상단)", f"{_format_value(end['p10'], 1)} ~ {_format_value(end['p90'], 1)}")
             cols[2].metric("기준일", str(fc.origin.date()))
             st.plotly_chart(make_forecast_chart(series, fc.path, f"KB {target_label}"), width="stretch")
+            if horizon >= 78:
+                st.warning(
+                    "104주(2년) 예측은 과거 검증에서 독립적인 2년 구간이 5개 안팎뿐입니다. 서울에서는 무변화 기준선보다 유의하게 낫지만(평균오차 8.0%p vs 12.8%p) "
+                    "전국 평균에서는 무변화와 거의 차이가 없고(8.8%p vs 9.3%p), 예측구간이 넓으며 실제 적중률은 목표 80%보다 낮은 75% 안팎입니다. 참고용으로만 보세요."
+                )
             _overlay_note(fit, region, horizon)
             _rate_scenario(fit, region, horizon, rate)
             with st.expander("기간별 예측 수익률", expanded=False):
