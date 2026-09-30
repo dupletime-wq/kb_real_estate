@@ -9,8 +9,8 @@ policy rate, with the slope constrained to be <= 0 (higher rates cannot raise ex
 Everything is causal: at each origin the slope only uses residuals whose label window has already closed
 (date + horizon <= origin), and the rate change only uses rates announced by that date.
 
-Evidence level (see README, reproduced by scripts/validate.py): MAE -2.2/-2.4/-2.8% at 13/26/52 weeks on the Seoul
-series, one-sided Diebold-Mariano p ~ 0.13, i.e. suggestive rather than statistically established.
+Evidence level (see README, reproduced by scripts/validate.py): MAE -2.0/-2.9/-4.0% at 13/26/52 weeks on the Seoul
+series, one-sided Diebold-Mariano p ~ 0.09-0.11, i.e. suggestive rather than statistically established.
 """
 from __future__ import annotations
 
