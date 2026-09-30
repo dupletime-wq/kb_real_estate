@@ -23,7 +23,7 @@ from kbforecast.engine import blend_model, model_columns  # noqa: E402
 from kbforecast.evaluation import WFConfig, baseline_predictions, dm_test, score, walk_forward  # noqa: E402
 from kbforecast.features import build_features  # noqa: E402
 from kbforecast.kb_panel import parse_kb_panel, seoul_region_keys  # noqa: E402
-from kbforecast.overlay import apply_seoul_rate_overlay, load_base_rate, rate_change_weekly  # noqa: E402
+from kbforecast.overlay import apply_seoul_rate_overlay, load_base_rate, load_cd91, rate_signal_weekly  # noqa: E402
 
 
 def main() -> None:
@@ -38,7 +38,7 @@ def main() -> None:
     cols = model_columns(fs)
     seoul = tuple(sorted(seoul_region_keys(kb.hierarchy) & set(kb.sale.columns)))
     dates = fs.log_price.index
-    z_rate = rate_change_weekly(load_base_rate(None), dates)
+    z_rate = rate_signal_weekly(load_base_rate(None), load_cd91(None), dates)
 
     rows = []
     for h in (int(x) for x in args.horizons.split(",")):

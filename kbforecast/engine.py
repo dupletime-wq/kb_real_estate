@@ -20,14 +20,14 @@ from .evaluation import WFConfig, baseline_predictions, walk_forward
 from .features import FeatureSet, build_features, make_targets
 from .intervals import conformal_quantiles, scale_from_vol
 from .kb_panel import KBPanel, seoul_region_keys
-from .overlay import RateSeries, apply_seoul_rate_overlay, rate_change_weekly
+from .overlay import RateSeries, apply_seoul_rate_overlay, rate_change_weekly, rate_signal_weekly
 
-ENGINE_VERSION = "v4"  # bump when model/feature/interval settings change (invalidates on-disk caches)
+ENGINE_VERSION = "v5"  # bump when model/feature/interval settings change (invalidates on-disk caches)
 ANCHORS = (4, 8, 13, 20, 26, 39, 52, 78, 104)
 LONG_HORIZON = 78  # from here on the tree model is dropped: the ridge alone beats the blend (Seoul MAE 6.18 vs 6.36 at 78w, 7.88 vs 8.07 at 104w)
 REL_FEATURES = ("rel13", "rel26", "cs_rank13", "cs_rank26")
 # Features that add nothing out of sample (kept in FeatureSet, left out of the models). Found by dropping each feature family in the
-# pooled walk-forward (13/26/52 weeks, all regions and Seoul) and then dropping the neutral ones together: 60 -> 33 features with
+# pooled walk-forward (13/26/52 weeks, all regions and Seoul) and then dropping the neutral ones together: 60 -> 33 features (then +6 sentiment-drawdown features = 39) with
 # the same accuracy (all regions MSE +0.1/-0.0/-1.0%, Seoul MAE -1.4/-1.0/-1.1%; every DM p > 0.38). Volatility is still used to scale
 # the prediction intervals. Families whose removal hurt (short momentum, own2 r2/r6/r39, ma4dev, dev156, jeonse_supply, rel13/26,
 # sale_txn) are kept.
@@ -49,7 +49,7 @@ HGB_KW = {
 
 def model_columns(fs: FeatureSet, use_macro: bool = False) -> list[str]:
     groups = fs.groups
-    cols = list(groups.get("own", [])) + list(groups.get("own2", [])) + list(groups.get("sentiment", [])) + list(groups.get("sent2", []))
+    cols = list(groups.get("own", [])) + list(groups.get("own2", [])) + list(groups.get("sentiment", [])) + list(groups.get("sent2", [])) + list(groups.get("sent3", []))
     cols += [c for c in REL_FEATURES if c in fs.X.columns]
     if use_macro:
         cols += list(groups.get("macro", []))
@@ -91,11 +91,13 @@ def fit_engine(
     eval_step: int = 2,
     use_macro: bool = False,
     rate: RateSeries | None = None,
+    cd: RateSeries | None = None,
     progress: Callable[[int, int, str], None] | None = None,
 ) -> EngineFit:
     """Walk-forward fit at every anchor horizon (also yields the live-origin forecasts and calibrated intervals).
 
-    If `rate` is given, Seoul series get the policy-rate overlay (see overlay.py) before intervals are calibrated.
+    If `rate` is given, Seoul series get the rate overlay (base rate, averaged with the CD rate when `cd` is given; see overlay.py)
+    before intervals are calibrated.
     """
     fs = build_features(kb, macro_weekly if use_macro else None)
     cols = model_columns(fs, use_macro)
@@ -103,7 +105,9 @@ def fit_engine(
     if first_origin is None:
         first_origin = "2014-01-06"  # the validated walk-forward start; the overlay slope needs the 2022-23 tightening in-sample
     seoul = seoul_region_keys(kb.hierarchy) & set(fs.log_price.columns)
-    z_rate = rate_change_weekly(rate, dates) if rate is not None else None
+    z_rate = rate_signal_weekly(rate, cd, dates) if rate is not None else None
+    z_base = rate_change_weekly(rate, dates) if rate is not None else None
+    z_cd = rate_change_weekly(cd, dates) if cd is not None else None
     overlay_info: dict = {}
     vol = 0.5 * fs.X["vol52"] + 0.5 * fs.X["vol13"]
     preds: dict[int, pd.DataFrame] = {}
@@ -119,9 +123,12 @@ def fit_engine(
             pred, slopes = apply_seoul_rate_overlay(pred, z_rate, h, dates, seoul)
             overlay_info[h] = {
                 "slope": float(slopes.iloc[-1]) if len(slopes) else 0.0,
-                "rate_change_26w": float(z_rate.iloc[-1]) if np.isfinite(z_rate.iloc[-1]) else float("nan"),
+                "signal": float(z_rate.iloc[-1]) if np.isfinite(z_rate.iloc[-1]) else float("nan"),
+                "rate_change_26w": float(z_base.iloc[-1]) if np.isfinite(z_base.iloc[-1]) else float("nan"),
+                "cd_change_26w": float(z_cd.iloc[-1]) if z_cd is not None and np.isfinite(z_cd.iloc[-1]) else float("nan"),
                 "rate_known_through": str(rate.known_through.date()),
                 "rate_source": rate.source,
+                "cd_known_through": str(cd.known_through.date()) if cd is not None else "",
             }
         lq, uq = CONFORMAL_LEVELS.get(h, (0.05, 0.95))
         preds[h] = conformal_quantiles(pred, scale_from_vol(vol, h), h, dates, lower_q=lq, upper_q=uq, window_weeks=260)
@@ -149,7 +156,7 @@ def _feature_group_map(fs: FeatureSet, cols: list[str]) -> dict[str, str]:
     return {c: out.get(c, "other") for c in cols}
 
 
-GROUP_LABELS = {"own": "자체 모멘텀·변동성", "own2": "자체 모멘텀(보조)", "sentiment": "KB 심리지표", "sent2": "KB 심리지표(보조)", "market": "지역 상대강도", "macro": "거시지표", "jeonse": "전세"}
+GROUP_LABELS = {"own": "자체 모멘텀·변동성", "own2": "자체 모멘텀(보조)", "sentiment": "KB 심리지표", "sent2": "KB 심리지표(보조)", "sent3": "KB 심리 낙폭(고점 대비)", "market": "지역 상대강도", "macro": "거시지표", "jeonse": "전세"}
 
 
 def _ridge_contributions(fs: FeatureSet, cols: list[str], h: int) -> pd.DataFrame:
