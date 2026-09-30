@@ -90,3 +90,13 @@ def test_hgb_tolerates_columns_that_are_all_nan_or_constant_in_training():
     y = 0.4 * X["a"].to_numpy() + rng.normal(scale=0.1, size=600)
     pred = M.hgb_model(max_iter=50, min_samples_leaf=20)(X.iloc[:400], y[:400], X.iloc[400:])
     assert np.isfinite(pred).all() and np.corrcoef(pred, y[400:])[0, 1] > 0.7
+
+
+def test_pruned_features_are_left_out_of_the_models_but_kept_for_intervals():
+    from kbforecast.engine import PRUNED_FEATURES, model_columns
+
+    fs = build_features(make_panel())
+    cols = model_columns(fs)
+    assert not set(cols) & PRUNED_FEATURES
+    assert {"vol13", "vol52"} <= set(fs.X.columns)  # still computed: they scale the prediction intervals
+    assert {"r1", "r4", "r8", "r39", "rel13", "rel26"} <= set(cols)  # the families whose removal hurt stay

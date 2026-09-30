@@ -22,9 +22,21 @@ from .intervals import conformal_quantiles, scale_from_vol
 from .kb_panel import KBPanel, seoul_region_keys
 from .overlay import RateSeries, apply_seoul_rate_overlay, rate_change_weekly
 
-ENGINE_VERSION = "v2"  # bump when model/feature/interval settings change (invalidates on-disk caches)
+ENGINE_VERSION = "v3"  # bump when model/feature/interval settings change (invalidates on-disk caches)
 ANCHORS = (4, 8, 13, 20, 26, 39, 52)
 REL_FEATURES = ("rel13", "rel26", "cs_rank13", "cs_rank26")
+# Features that add nothing out of sample (kept in FeatureSet, left out of the models). Found by dropping each feature family in the
+# pooled walk-forward (13/26/52 weeks, all regions and Seoul) and then dropping the neutral ones together: 60 -> 33 features with
+# the same accuracy (all regions MSE +0.1/-0.0/-1.0%, Seoul MAE -1.4/-1.0/-1.1%; every DM p > 0.38). Volatility is still used to scale
+# the prediction intervals. Families whose removal hurt (short momentum, own2 r2/r6/r39, ma4dev, dev156, jeonse_supply, rel13/26,
+# sale_txn) are kept.
+PRUNED_FEATURES = frozenset({
+    "r13", "r26", "r52", "vol13", "vol52", "trend_t13", "dd52", "up52", "gap26",  # own momentum/vol/position (r1..r8, r39, acc13/26 stay)
+    "dd26", "acc8", "r4_over_vol",  # own2 leftovers
+    "buyer_z52", "sale_txn_z52", "jeonse_supply_z52", "jeonse_txn_z52",  # 52-week z-scores (dev156 / lvl / changes cover them)
+    "buyer_vs_prov_d13", "sale_txn_vs_prov_d13", "jeonse_supply_vs_prov_d13", "jeonse_txn_vs_prov_d13",
+    "jeonse_txn_lvl", "jeonse_txn_d4", "jeonse_txn_d13", "jeonse_txn_d8", "jeonse_txn_d26", "jeonse_txn_ma4dev", "jeonse_txn_dev156",  # jeonse trading activity
+})
 # validated per-horizon settings: ridge alpha (stronger shrinkage for longer horizons), conformal levels for ~80% coverage
 RIDGE_ALPHA = {4: 10000.0, 8: 30000.0, 13: 30000.0, 20: 100000.0, 26: 100000.0, 39: 100000.0, 52: 100000.0}
 CONFORMAL_LEVELS = {4: (0.07, 0.93), 8: (0.07, 0.93), 13: (0.07, 0.93), 20: (0.05, 0.95), 26: (0.05, 0.95), 39: (0.05, 0.95), 52: (0.05, 0.95)}
@@ -40,7 +52,7 @@ def model_columns(fs: FeatureSet, use_macro: bool = False) -> list[str]:
     cols += [c for c in REL_FEATURES if c in fs.X.columns]
     if use_macro:
         cols += list(groups.get("macro", []))
-    return cols
+    return [c for c in cols if c not in PRUNED_FEATURES]
 
 
 def blend_model(horizon: int) -> M.ModelFn:
