@@ -181,8 +181,14 @@ def _parse_index_sheet(rows: list[dict[int, str]]) -> tuple[pd.DataFrame, pd.Dat
 
 
 def _fill_short_gaps(wide: pd.DataFrame, limit: int = 2) -> pd.DataFrame:
-    """Linear-fill gaps of at most `limit` weeks *inside* each series' observed span (no edge extrapolation)."""
-    return wide.interpolate(method="linear", limit=limit, limit_area="inside")
+    """Carry the last observation forward over gaps of at most `limit` weeks *inside* each series' observed span.
+
+    Forward fill only: an interpolation would use the value *after* the gap, i.e. information that was not yet known at the
+    gap dates, and leak up to `limit` weeks of the future into the features and the walk-forward validation. No edge extrapolation.
+    """
+    filled = wide.ffill(limit=limit)
+    inside = wide.notna().cummax() & wide.iloc[::-1].notna().cummax().iloc[::-1]
+    return wide.where(~(wide.isna() & inside), filled)
 
 
 def _parse_indicator_sheet(rows: list[dict[int, str]]) -> pd.DataFrame:
@@ -203,7 +209,7 @@ def _parse_indicator_sheet(rows: list[dict[int, str]]) -> pd.DataFrame:
     frame = pd.DataFrame.from_dict(records, orient="index").sort_index()
     frame.index.name = "date"
     full = pd.date_range(frame.index.min(), frame.index.max(), freq=WEEKLY)
-    return frame.reindex(full).interpolate(limit=2, limit_area="inside").rename_axis("date")
+    return _fill_short_gaps(frame.reindex(full)).rename_axis("date")
 
 
 def parse_kb_panel(file_bytes: bytes) -> KBPanel:
