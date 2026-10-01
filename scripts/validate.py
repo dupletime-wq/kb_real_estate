@@ -1,6 +1,6 @@
 """Reproduce the headline walk-forward validation on a KB weekly workbook.
 
-    python scripts/validate.py path/to/KB_주간시계열.xlsx [--first-origin 2014-01-06]
+    python scripts/validate.py path/to/KB_주간시계열.xlsx [--first-origin 2014-01-06] [--observed-only]
 
 For every horizon it retrains at every 26-week refit point using only labels that have closed by then, predicts
 the next origins, and compares the production blend with a random walk, a 26-week drift extrapolation and a
@@ -21,9 +21,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from kbforecast import models as M  # noqa: E402
 from kbforecast.engine import blend_model, model_columns  # noqa: E402
 from kbforecast.evaluation import WFConfig, baseline_predictions, dm_test, score, walk_forward  # noqa: E402
-from kbforecast.features import build_features  # noqa: E402
+from kbforecast.features import build_features, make_targets  # noqa: E402
 from kbforecast.kb_panel import parse_kb_panel, seoul_region_keys  # noqa: E402
-from kbforecast.overlay import apply_seoul_rate_overlay, load_base_rate, rate_change_weekly  # noqa: E402
+from kbforecast.overlay import apply_seoul_rate_overlay, load_base_rate, load_cd91, rate_signal_weekly  # noqa: E402
 
 
 def main() -> None:
@@ -31,6 +31,11 @@ def main() -> None:
     parser.add_argument("workbook", type=Path)
     parser.add_argument("--first-origin", default="2014-01-06")
     parser.add_argument("--horizons", default="13,26,52")
+    parser.add_argument(
+        "--observed-only",
+        action="store_true",
+        help="build training and validation targets only where the origin price and the price h weeks later were actual observations (no filled values)",
+    )
     args = parser.parse_args()
 
     kb = parse_kb_panel(args.workbook.read_bytes())
@@ -38,14 +43,15 @@ def main() -> None:
     cols = model_columns(fs)
     seoul = tuple(sorted(seoul_region_keys(kb.hierarchy) & set(kb.sale.columns)))
     dates = fs.log_price.index
-    z_rate = rate_change_weekly(load_base_rate(None), dates)
+    z_rate = rate_signal_weekly(load_base_rate(None), load_cd91(None), dates)
 
     rows = []
     for h in (int(x) for x in args.horizons.split(",")):
         cfg = WFConfig(horizon=h, first_origin=args.first_origin, eval_step=2, refit_every=26)
         rw, drift = baseline_predictions(fs, h, "rw"), baseline_predictions(fs, h, "drift26")
-        linmom = walk_forward(fs, ["r13", "r26", "r52"], M.ridge_model(50.0), cfg)
-        blend = walk_forward(fs, cols, blend_model(h), cfg)
+        y = make_targets(fs.log_price, h, kb.observed["sale"]) if args.observed_only else None
+        linmom = walk_forward(fs, ["r13", "r26", "r52"], M.ridge_model(50.0), cfg, y=y)
+        blend = walk_forward(fs, cols, blend_model(h), cfg, y=y)
         for label, subset in (("Seoul (28 series)", seoul), ("All regions", None)):
             sel = (lambda d: d) if subset is None else (lambda d: d[d.index.get_level_values("region").isin(subset)])
             for name, frame in (("linear momentum", linmom), ("production blend", blend)):

@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import pytest
 
 from kbforecast.kb_panel import seoul_region_keys
 from kbforecast.overlay import RateSeries, apply_seoul_rate_overlay, load_base_rate, rate_change_weekly
@@ -88,10 +89,36 @@ def test_scenario_path_and_adjustment_fade():
     assert path["date"].is_monotonic_increasing and path["date"].iloc[0] > pd.Timestamp("2018-02-01")
     run = scenario_adjustments(rate, 3.5, 4, {26: -0.02}, {26: 0.05})
     tl = run["timeline"]
-    assert run["peak_delta26"] == 0.5
-    assert tl["adj_26"].min() == -0.02 * 0.5 * 100
-    assert tl["delta26"].iloc[-1] == 0.0  # drag fades once the last move is 26+ weeks old
+    from kbforecast.overlay import SIGMA_BASE
+
+    assert run["peak_signal"] == pytest.approx(0.5 / SIGMA_BASE)  # a 0.5%p rise over 26 weeks, in standardised units
+    assert tl["adj_26"].min() == pytest.approx(-0.02 * 0.5 / SIGMA_BASE * 100)
+    assert tl["signal"].iloc[-1] == 0.0  # drag fades once the last move is 26+ weeks old
     assert run["summary"][26]["return_at_peak_pct"] < run["summary"][26]["raw_return_pct"]
     # no move needed -> nothing beyond what is already known
     flat = scenario_adjustments(rate, 3.0, 4, {26: -0.02}, {26: 0.05})
     assert flat["path"].empty
+
+
+def test_rate_signal_averages_base_rate_and_cd_changes():
+    from kbforecast.overlay import SIGMA_BASE, SIGMA_CD, rate_signal_weekly
+
+    base = _rate({"2014-01-01": 2.0, "2016-01-04": 2.5}, through="2018-01-01")
+    cd_frame = pd.DataFrame({"date": pd.date_range("2014-01-01", "2018-01-01", freq="D")})
+    cd_frame["value"] = np.where(cd_frame["date"] >= "2016-01-04", 2.9, 2.1)  # the CD rate moved by 0.8 when the base rate moved by 0.5
+    cd = RateSeries(cd_frame, pd.Timestamp("2018-01-01"), "test")
+    day = pd.Timestamp("2016-01-11") + pd.Timedelta(weeks=1)
+    both = rate_signal_weekly(base, cd, DATES, weeks=26)
+    only = rate_signal_weekly(base, None, DATES, weeks=26)
+    assert only.loc[day] == pytest.approx(0.5 / SIGMA_BASE)
+    assert both.loc[day] == pytest.approx(0.5 * (0.5 / SIGMA_BASE + 0.8 / SIGMA_CD))
+
+
+def test_scenario_extends_cd_with_base_rate_moves():
+    from kbforecast.overlay import SIGMA_BASE, SIGMA_CD, scenario_adjustments
+
+    base = _rate({"2014-01-01": 3.0}, through="2018-02-01")
+    cd_frame = pd.DataFrame({"date": pd.date_range("2014-01-01", "2018-02-01", freq="D"), "value": 3.3})
+    cd = RateSeries(cd_frame, pd.Timestamp("2018-02-01"), "test")
+    run = scenario_adjustments(base, 3.5, 4, {26: -0.02}, {26: 0.05}, cd=cd)
+    assert run["peak_signal"] == pytest.approx(0.5 * (0.5 / SIGMA_BASE + 0.5 / SIGMA_CD))  # CD follows the +0.5 base-rate path

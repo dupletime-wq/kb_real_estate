@@ -14,7 +14,7 @@ from .kb_panel import KBPanel
 
 MARKET_REFS = ("서울특별시", "수도권", "경기도", "전국", "6개광역시")
 INDICATORS = ("buyer", "sale_txn", "jeonse_supply", "jeonse_txn")
-GROUP_ORDER = ("own", "own2", "market", "jeonse", "sentiment", "sent2", "macro")
+GROUP_ORDER = ("own", "own2", "market", "jeonse", "sentiment", "sent2", "sent3", "macro")
 
 
 @dataclass(frozen=True)
@@ -185,6 +185,11 @@ def build_features(kb: KBPanel, macro_w: pd.DataFrame | None = None) -> FeatureS
         prov = pd.DataFrame({c: kb.sentiment[indicator][ps].reindex(L.index) if ps in kb.sentiment[indicator].columns else np.nan
                              for c, ps in parent_scope.items()}, index=L.index)
         add("sent2", f"{indicator}_vs_prov_d13", (wide - wide.shift(13)) - (prov - prov.shift(13)))
+        # distance from the recent peak: a sentiment index that has rolled over while prices still rise
+        add("sent3", f"{indicator}_dd26", wide - wide.rolling(26, min_periods=13).max())
+        if indicator == "buyer":
+            add("sent3", "buyer_dd52", wide - wide.rolling(52, min_periods=26).max())
+            add("sent3", "buyer_up26", wide - wide.rolling(26, min_periods=13).min())
 
     if macro_w is not None and not macro_w.empty:
         for name, series in _macro_features(macro_w.reindex(L.index)).items():
@@ -200,9 +205,16 @@ def build_features(kb: KBPanel, macro_w: pd.DataFrame | None = None) -> FeatureS
     return FeatureSet(X=X, log_price=L, groups=groups, reference=ref)
 
 
-def make_targets(log_price: pd.DataFrame, horizon: int) -> pd.Series:
-    """h-week-ahead log return, long-indexed like the feature frame (NaN where the future is unobserved)."""
+def make_targets(log_price: pd.DataFrame, horizon: int, observed: pd.DataFrame | None = None) -> pd.Series:
+    """h-week-ahead log return, long-indexed like the feature frame (NaN where the future is unobserved).
+
+    With `observed` (True = actual observation, see `KBPanel.observed`) the target is kept only where both the origin price and the
+    price `horizon` weeks later were real observations, so no label is built from a carried-forward (filled) value.
+    """
     y = log_price.shift(-horizon) - log_price
+    if observed is not None:
+        obs = observed.reindex(index=log_price.index, columns=log_price.columns).fillna(False).astype(bool)
+        y = y.where(obs & obs.shift(-horizon, fill_value=False))
     return y.stack(future_stack=True).rename(f"y{horizon}").reindex(
         pd.MultiIndex.from_product([log_price.index, log_price.columns], names=["date", "region"])
     )

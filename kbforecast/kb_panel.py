@@ -45,6 +45,8 @@ class KBPanel:
     hierarchy: pd.DataFrame
     fingerprint: str
     warnings: tuple[str, ...]
+    # True where a sale / jeonse value is an actual observation (False = filled by `_fill_short_gaps`); None if unknown
+    observed: dict[str, pd.DataFrame] | None = None
 
     @property
     def last_date(self) -> pd.Timestamp:
@@ -52,7 +54,8 @@ class KBPanel:
 
     def swap_target(self) -> "KBPanel":
         """View of the panel with sale and jeonse swapped, so the same engine can forecast the jeonse index."""
-        return KBPanel(self.jeonse, self.sale, self.sentiment, self.hierarchy, self.fingerprint, self.warnings)
+        swapped = None if self.observed is None else {"sale": self.observed["jeonse"], "jeonse": self.observed["sale"]}
+        return KBPanel(self.jeonse, self.sale, self.sentiment, self.hierarchy, self.fingerprint, self.warnings, swapped)
 
 
 def seoul_region_keys(hierarchy: pd.DataFrame) -> set[str]:
@@ -181,8 +184,14 @@ def _parse_index_sheet(rows: list[dict[int, str]]) -> tuple[pd.DataFrame, pd.Dat
 
 
 def _fill_short_gaps(wide: pd.DataFrame, limit: int = 2) -> pd.DataFrame:
-    """Linear-fill gaps of at most `limit` weeks *inside* each series' observed span (no edge extrapolation)."""
-    return wide.interpolate(method="linear", limit=limit, limit_area="inside")
+    """Carry the last observation forward for at most `limit` weeks after it (and never before a series' first observation).
+
+    Strictly causal: the value at a date depends only on observations up to that date, so cutting off later rows of the raw data
+    leaves every earlier row unchanged (an interpolation, or any rule that asks whether a later observation exists, would not).
+    The price of that: a series that really ended keeps its last value for `limit` more weeks. Rows filled this way are not
+    observations, which is why the panel records which cells were observed (`KBPanel.observed`) and validation can restrict itself to them.
+    """
+    return wide.ffill(limit=limit)
 
 
 def _parse_indicator_sheet(rows: list[dict[int, str]]) -> pd.DataFrame:
@@ -203,7 +212,7 @@ def _parse_indicator_sheet(rows: list[dict[int, str]]) -> pd.DataFrame:
     frame = pd.DataFrame.from_dict(records, orient="index").sort_index()
     frame.index.name = "date"
     full = pd.date_range(frame.index.min(), frame.index.max(), freq=WEEKLY)
-    return frame.reindex(full).interpolate(limit=2, limit_area="inside").rename_axis("date")
+    return _fill_short_gaps(frame.reindex(full)).rename_axis("date")
 
 
 def parse_kb_panel(file_bytes: bytes) -> KBPanel:
@@ -223,11 +232,13 @@ def parse_kb_panel(file_bytes: bytes) -> KBPanel:
     else:
         jeonse = pd.DataFrame(index=sale.index, columns=sale.columns, dtype=float)
         warnings.append("전세지수 시트를 찾지 못했습니다. 전세 관련 피처는 사용되지 않습니다.")
+    observed = {"sale": sale.notna(), "jeonse": jeonse.notna()}
     sale = _fill_short_gaps(sale)
     jeonse = _fill_short_gaps(jeonse)
     empty = [c for c in sale.columns if sale[c].notna().sum() == 0]
     if empty:
         sale, jeonse = sale.drop(columns=empty), jeonse.drop(columns=empty)
+        observed = {k: v.drop(columns=empty) for k, v in observed.items()}
         hierarchy = hierarchy.loc[~hierarchy["key"].isin(empty)].reset_index(drop=True)
 
     sentiment: dict[str, pd.DataFrame] = {}
@@ -243,4 +254,4 @@ def parse_kb_panel(file_bytes: bytes) -> KBPanel:
     scopes = set().union(*[set(f.columns) for f in sentiment.values()]) if sentiment else set()
     hierarchy = hierarchy.copy()
     hierarchy["sentiment_scope"] = hierarchy.apply(lambda r: _sentiment_scope_chain(r, scopes), axis=1)
-    return KBPanel(sale, jeonse, sentiment, hierarchy.set_index("key", drop=False), fingerprint, tuple(warnings))
+    return KBPanel(sale, jeonse, sentiment, hierarchy.set_index("key", drop=False), fingerprint, tuple(warnings), observed)

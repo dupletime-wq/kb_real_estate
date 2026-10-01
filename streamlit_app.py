@@ -17,12 +17,12 @@ from kbforecast.hub import HubData, HubReport, extend_kb_panel, fetch_hub
 from kbforecast.indicators import IndicatorResult, evaluate_indicators
 from kbforecast.kb_panel import KBPanel, parse_kb_panel, seoul_region_keys
 from kbforecast.macro import ecos_api_key, load_macro, macro_weekly
-from kbforecast.overlay import RateSeries, load_base_rate, scenario_adjustments
+from kbforecast.overlay import RateSeries, load_base_rate, load_cd91, scenario_adjustments
 
 APP_TITLE = "KB 부동산 시세 예측 대시보드"
 CACHE_DIR = Path(".cache")
 HUB_TTL_SECONDS = 6 * 3600
-HORIZONS = (13, 26, 52)
+HORIZONS = (13, 26, 52, 104)
 PROVINCE_ORDER = (
     "서울특별시", "경기도", "인천광역시", "부산광역시", "대구광역시", "대전광역시", "울산광역시", "(구)광주광역시",
     "전남광주통합특별시", "세종특별자치시", "강원특별자치도", "충청북도", "충청남도", "전북특별자치도",
@@ -39,6 +39,11 @@ def load_panel(file_bytes: bytes) -> KBPanel:
 @st.cache_data(show_spinner=False, ttl=24 * 3600)
 def load_rate(api_key: str) -> RateSeries:
     return load_base_rate(api_key or None)
+
+
+@st.cache_data(show_spinner=False, ttl=24 * 3600)
+def load_cd(api_key: str) -> RateSeries:
+    return load_cd91(api_key or None)
 
 
 def _hub_data(kb: KBPanel) -> HubData:
@@ -74,9 +79,11 @@ def extend_with_hub(kb: KBPanel) -> tuple[KBPanel, HubReport | None, str | None]
     return result
 
 
-def _engine_cache_path(fingerprint: str, target: str, use_macro: bool, rate: RateSeries | None) -> Path:
+def _engine_cache_path(fingerprint: str, target: str, use_macro: bool, rate: RateSeries | None, cd: RateSeries | None = None) -> Path:
     macro_tag = "macro" if use_macro else "base"
     rate_tag = f"rate{rate.known_through:%Y%m%d}" if rate is not None else "norate"
+    if cd is not None:
+        rate_tag += f"cd{cd.known_through:%Y%m%d}"
     tag = hashlib.sha1(fingerprint.encode()).hexdigest()[:12]  # includes the hub extension date
     return CACHE_DIR / f"engine_{tag}_{target}_{macro_tag}_{rate_tag}_{ENGINE_VERSION}.pkl"
 
@@ -99,15 +106,15 @@ def _save_engine_to_disk(path: Path, fit: EngineFit) -> None:
 
 
 def get_engine(
-    kb: KBPanel, target: str, use_macro: bool, api_key: str, rate: RateSeries | None = None
+    kb: KBPanel, target: str, use_macro: bool, api_key: str, rate: RateSeries | None = None, cd: RateSeries | None = None
 ) -> tuple[EngineFit | None, list[str]]:
     """Fit (or reuse) the pooled engine for this workbook. Returns (fit, warnings)."""
-    key = (kb.fingerprint, target, use_macro, rate.known_through if rate is not None else None)
+    key = (kb.fingerprint, target, use_macro, rate.known_through if rate is not None else None, cd.known_through if cd is not None else None)
     store = st.session_state.setdefault("engine_fits", {})
     if key in store:
         return store[key], []
     warnings: list[str] = []
-    path = _engine_cache_path(kb.fingerprint, target, use_macro, rate)
+    path = _engine_cache_path(kb.fingerprint, target, use_macro, rate, cd)
     fit = _load_engine_from_disk(path)
     if fit is None:
         model_kb = kb if target == "sale" else kb.swap_target()
@@ -125,7 +132,7 @@ def get_engine(
             def progress(done: int, total: int, message: str) -> None:
                 bar.progress(min(1.0, done / max(total, 1)), text=message)
 
-            fit = fit_engine(model_kb, macro_w, use_macro=use_macro, rate=rate, progress=progress)
+            fit = fit_engine(model_kb, macro_w, use_macro=use_macro, rate=rate, cd=cd, progress=progress)
             status.update(label="예측 엔진 준비 완료", state="complete", expanded=False)
         _save_engine_to_disk(path, fit)
     store[key] = fit
@@ -300,16 +307,19 @@ def _overlay_note(fit: EngineFit, region: str, horizon: int) -> None:
     except KeyError:
         return
     adj = float(live.get("overlay", 0.0)) * 100
-    change = info["rate_change_26w"]
-    change_text = "확인 불가" if pd.isna(change) else f"{change:+.2f}%p"
+
+    def pp(v: float) -> str:
+        return "확인 불가" if pd.isna(v) else f"{v:+.2f}%p"
+
+    cd_text = f", CD91 {pp(info['cd_change_26w'])}" if info.get("cd_known_through") else ""
     st.info(
-        f"**서울 기준금리 보정** · 최근 26주 기준금리 변화 {change_text} (자료 {info['rate_source']}, {info['rate_known_through']}까지) → "
-        f"{anchor}주 예측 수익률에 **{adj:+.2f}%p** 반영 (계수 {info['slope']:.2f}, 부호는 '금리↑ → 수익률↓'로 제한). "
-        "과거 검증에서 서울 평균오차를 2~3% 줄였지만 통계적 유의성은 약합니다(단측 p≈0.13). '예측 근거' 탭과 '검증' 탭에서 보정 전후를 볼 수 있습니다."
+        f"**서울 금리 보정** · 최근 26주 기준금리 {pp(info['rate_change_26w'])}{cd_text} (자료 {info['rate_source']}, {info['rate_known_through']}까지) → "
+        f"{anchor}주 예측 수익률에 **{adj:+.2f}%p** 반영 (부호는 '금리↑ → 수익률↓'로 제한, 기준금리와 CD91의 26주 변화를 표준화해 평균). "
+        "과거 검증에서 서울 평균오차를 3~4% 줄였지만 통계적 유의성은 약합니다(단측 p≈0.1). '예측 근거' 탭과 '검증' 탭에서 보정 전후를 볼 수 있습니다."
     )
 
 
-def _rate_scenario(fit: EngineFit, region: str, horizon: int, rate: RateSeries | None) -> None:
+def _rate_scenario(fit: EngineFit, region: str, horizon: int, rate: RateSeries | None, cd: RateSeries | None = None) -> None:
     """Seoul-only what-if: how the policy-rate term would evolve if the base rate follows a hypothetical path."""
     if not fit.overlay or rate is None or region not in seoul_region_keys(fit.hierarchy):
         return
@@ -325,7 +335,7 @@ def _rate_scenario(fit: EngineFit, region: str, horizon: int, rate: RateSeries |
         terminal = c1.number_input("최종 기준금리 (%)", min_value=1.0, max_value=7.0, value=max(3.75, current), step=0.25, format="%.2f")
         gap = c2.slider("인상 간격 (주, 1회 0.25%p)", min_value=4, max_value=26, value=7, help="금통위는 연 8회(약 6~7주 간격)입니다.")
         candidates = sorted({round(current, 2), 3.5, 3.75, 4.0, round(terminal, 2)})
-        runs = {c: scenario_adjustments(rate, c, gap, slopes, raw) for c in candidates}
+        runs = {c: scenario_adjustments(rate, c, gap, slopes, raw, cd=cd) for c in candidates}
         anchor = min(anchors, key=lambda a: abs(a - horizon))
         fig = go.Figure()
         for c, run in runs.items():
@@ -339,17 +349,17 @@ def _rate_scenario(fit: EngineFit, region: str, horizon: int, rate: RateSeries |
         for c, run in runs.items():
             info = run["summary"][anchor]
             rows.append({
-                "최종 금리(%)": c, "26주 금리 변화 최대(%p)": run["peak_delta26"],
+                "최종 금리(%)": c, "기준금리 26주 변화 최대(%p)": run["peak_base_delta26"],
                 "보정 최대 하락(%p)": info["peak_adjustment_pp"], "그 시점": info["peak_date"].date(),
-                "보정 소멸 시점": run["fade_date"].date() if run["peak_delta26"] > 0 else None,
+                "보정 소멸 시점": run["fade_date"].date() if run["peak_base_delta26"] > 0 else None,
                 "보정 전 예측(%)": info["raw_return_pct"], "보정 최대 시 예측(%)": info["return_at_peak_pct"],
             })
         st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True,
-                     column_config={c: st.column_config.NumberColumn(format="%.2f") for c in ("최종 금리(%)", "26주 금리 변화 최대(%p)", "보정 최대 하락(%p)", "보정 전 예측(%)", "보정 최대 시 예측(%)")})
+                     column_config={c: st.column_config.NumberColumn(format="%.2f") for c in ("최종 금리(%)", "기준금리 26주 변화 최대(%p)", "보정 최대 하락(%p)", "보정 전 예측(%)", "보정 최대 시 예측(%)")})
         st.caption(
             "**이 시뮬레이션이 말해주는 것과 아닌 것.** 보정 항은 '기준금리 *26주 변화*'에 비례하므로, 같은 속도로 올리는 동안에는 최종 금리가 3.5%든 3.75%든 4.0%든 "
             "최대 하락폭이 같고 (높을수록 하락 압력이 더 오래 지속), 인상을 멈추고 26주가 지나면 보정이 0으로 돌아갑니다. 금리 *수준*의 누적 효과는 이 모형에 들어 있지 않습니다. "
-            "'보정 최대 시 예측'은 그 시점에도 다른 요인은 지금 예측(보정 전)과 같다고 둔 단순 합산이며 모형을 다시 학습한 예측이 아닙니다. 계수는 과거 몇 차례 금리 사이클에서 추정되어 불확실합니다(p≈0.13)."
+            "'보정 최대 시 예측'은 그 시점에도 다른 요인은 지금 예측(보정 전)과 같다고 둔 단순 합산이며 모형을 다시 학습한 예측이 아닙니다. 계수는 과거 몇 차례 금리 사이클에서 추정되어 불확실합니다(p≈0.1)."
         )
 
 
@@ -379,7 +389,7 @@ def _validation_tab(fit: EngineFit, kb: KBPanel, region: str, horizon: int) -> N
         seoul_rows = table[table["대상"] == "서울 28개 지역 평균"].copy()
         if not seoul_rows.empty:
             seoul_rows["보정 효과(%)"] = (seoul_rows["모델 평균오차(%p)"] / seoul_rows["raw_model_MAE_pp"] - 1) * 100
-            st.markdown("**서울 기준금리 보정 전/후 (서울 28개 지역 평균 오차, %p)**")
+            st.markdown("**서울 금리 보정 전/후 (서울 28개 지역 평균 오차, %p)**")
             st.dataframe(
                 seoul_rows[["예측 기간(주)", "raw_model_MAE_pp", "모델 평균오차(%p)", "보정 효과(%)"]].rename(
                     columns={"raw_model_MAE_pp": "보정 전", "모델 평균오차(%p)": "보정 후"}
@@ -388,8 +398,8 @@ def _validation_tab(fit: EngineFit, kb: KBPanel, region: str, horizon: int) -> N
                 column_config={c: st.column_config.NumberColumn(format="%.3f") for c in ("보정 전", "보정 후", "보정 효과(%)")},
             )
             st.caption(
-                "보정은 서울 시리즈의 과거 검증 잔차를 '기준금리 26주 변화'에 회귀한 단일 계수(≤0)로 만듭니다. 각 시점에서는 그때까지 라벨이 확정된 잔차만 씁니다. "
-                "개선은 금리 인상기(2022–23)에 집중되어 있고 통계적으로는 단측 p≈0.13 수준이라, 경제적 판단(서울의 유동성 민감도)에 근거해 적용한 것입니다."
+                "보정은 서울 시리즈의 과거 검증 잔차를 '기준금리와 CD91의 26주 변화(표준화 평균)'에 회귀한 단일 계수(≤0)로 만듭니다. 각 시점에서는 그때까지 라벨이 확정된 잔차만 씁니다. "
+                "개선은 금리 인상기(2022–23)에 집중되어 있고 통계적으로는 단측 p≈0.1 수준이라, 경제적 판단(서울의 유동성 민감도)에 근거해 적용한 것입니다."
             )
     first, last = table["from"].min().date(), table["to"].max().date()
     st.caption(
@@ -435,7 +445,7 @@ def main() -> None:
     st.markdown(
         """
         <div class="app-note">
-        KB 주간시계열 XLSX의 전국 지역 전체를 하나의 패널로 학습해 주간 가격지수의 13·26·52주 뒤 변화를 예측합니다.
+        KB 주간시계열 XLSX의 전국 지역 전체를 하나의 패널로 학습해 주간 가격지수의 13·26·52·104주 뒤 변화를 예측합니다.
         모든 성능 수치는 과거 시점마다 재학습해 미래를 맞혀 본 walk-forward 검증 결과이며, 투자 권유가 아닙니다.
         </div>
         """,
@@ -487,9 +497,9 @@ def main() -> None:
         group = st.selectbox("권역", list(groups), index=list(groups).index("서울특별시") if "서울특별시" in groups else 0)
         region = st.selectbox("지역", groups[group], index=0)
         seoul_overlay = st.checkbox(
-            "서울 기준금리 보정", value=True, disabled=target != "sale",
-            help="서울은 유동성에 더 민감하다는 판단으로, 풀링 예측 위에 서울 시리즈에만 '기준금리 26주 변화'에 대한 보정(부호 제약)을 더합니다. "
-                 "과거 검증에서 오차가 소폭 줄었지만(단측 p≈0.13) 통계적으로 확정된 수준은 아닙니다. 매매지수에만 적용됩니다.",
+            "서울 금리 보정 (기준금리·CD91)", value=True, disabled=target != "sale",
+            help="서울은 유동성에 더 민감하다는 판단으로, 풀링 예측 위에 서울 시리즈에만 '기준금리·CD91 26주 변화'에 대한 보정(부호 제약)을 더합니다. "
+                 "과거 검증에서 오차가 소폭 줄었지만(단측 p≈0.1) 통계적으로 확정된 수준은 아닙니다. 매매지수에만 적용됩니다.",
         )
         with st.expander("고급 (실험)"):
             use_macro = st.checkbox(
@@ -498,13 +508,16 @@ def main() -> None:
             )
             api_key = st.text_input("ECOS 인증키", value=ecos_api_key(), type="password") if use_macro else ""
 
-    rate = load_rate(api_key or ecos_api_key()) if (seoul_overlay and target == "sale") else None
-    if rate is not None and rate.known_through < kb.last_date:
+    overlay_on = seoul_overlay and target == "sale"
+    rate = load_rate(api_key or ecos_api_key()) if overlay_on else None
+    cd = load_cd(api_key or ecos_api_key()) if overlay_on else None
+    stale = [name for name, series in (("기준금리", rate), ("CD91", cd)) if series is not None and series.known_through < kb.last_date]
+    if stale:
         st.sidebar.warning(
-            f"기준금리 자료가 {rate.known_through.date()}까지만 반영되어 있어 그 이후 금리 변경은 보정에 들어가지 않습니다 "
+            f"{', '.join(stale)} 자료가 워크북 기준일보다 오래되어 그 이후 금리 변화는 보정에 들어가지 않습니다 "
             "(ECOS 인증키를 넣으면 최신 자료로 갱신됩니다)."
         )
-    fit, fit_warnings = get_engine(kb, target, use_macro and bool(api_key), api_key, rate)
+    fit, fit_warnings = get_engine(kb, target, use_macro and bool(api_key), api_key, rate, cd)
     for message in fit_warnings:
         st.sidebar.warning(message)
 
@@ -542,8 +555,13 @@ def main() -> None:
             cols[1].metric("예측구간 (하단 ~ 상단)", f"{_format_value(end['p10'], 1)} ~ {_format_value(end['p90'], 1)}")
             cols[2].metric("기준일", str(fc.origin.date()))
             st.plotly_chart(make_forecast_chart(series, fc.path, f"KB {target_label}"), width="stretch")
+            if horizon >= 78:
+                st.warning(
+                    "104주(2년) 예측은 과거 검증에서 독립적인 2년 구간이 5개 안팎뿐입니다. 서울에서는 무변화 기준선보다 유의하게 낫지만(평균오차 7.9%p vs 12.8%p) "
+                    "전국 평균에서는 무변화와 거의 차이가 없고(8.6%p vs 9.3%p), 예측구간이 넓으며 실제 적중률은 목표 80%보다 낮은 75% 안팎입니다. 참고용으로만 보세요."
+                )
             _overlay_note(fit, region, horizon)
-            _rate_scenario(fit, region, horizon, rate)
+            _rate_scenario(fit, region, horizon, rate, cd)
             with st.expander("기간별 예측 수익률", expanded=False):
                 st.dataframe(
                     fc.anchor_table.rename(columns={"h": "기간(주)", "pred_pct": "예측 수익률(%)", "lo_pct": "하단(%)", "hi_pct": "상단(%)"}),
