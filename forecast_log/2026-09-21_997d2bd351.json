@@ -1,0 +1,230 @@
+{
+  "origin": "2026-09-21",
+  "logged_at_utc": "2026-10-01T08:45:15+00:00",
+  "git_commit": "0c642ea03622c611879d777e19a81481ce9b0465+dirty",
+  "data_fingerprint": "64e4977b6f74e4c38432c9bd18e5dd87947720e7b962e91bc04be021cec2c719+hub20260921",
+  "workbook_last_date": "2026-09-21",
+  "rows": 288,
+  "regions": 32,
+  "model_config": {
+    "engine_version": "v7",
+    "anchors": [
+      4,
+      8,
+      13,
+      20,
+      26,
+      39,
+      52,
+      78,
+      104
+    ],
+    "feature_columns": [
+      "r1",
+      "r4",
+      "r8",
+      "acc13",
+      "acc26",
+      "r2",
+      "r6",
+      "r39",
+      "buyer_lvl",
+      "buyer_d4",
+      "buyer_d13",
+      "sale_txn_lvl",
+      "sale_txn_d4",
+      "sale_txn_d13",
+      "jeonse_supply_lvl",
+      "jeonse_supply_d4",
+      "jeonse_supply_d13",
+      "buyer_d8",
+      "buyer_d26",
+      "buyer_ma4dev",
+      "buyer_dev156",
+      "sale_txn_d8",
+      "sale_txn_d26",
+      "sale_txn_ma4dev",
+      "sale_txn_dev156",
+      "jeonse_supply_d8",
+      "jeonse_supply_d26",
+      "jeonse_supply_ma4dev",
+      "jeonse_supply_dev156",
+      "buyer_dd26",
+      "buyer_dd52",
+      "buyer_up26",
+      "sale_txn_dd26",
+      "jeonse_supply_dd26",
+      "jeonse_txn_dd26",
+      "rel13",
+      "rel26",
+      "cs_rank13",
+      "cs_rank26"
+    ],
+    "pruned_features": [
+      "acc8",
+      "buyer_vs_prov_d13",
+      "buyer_z52",
+      "dd26",
+      "dd52",
+      "gap26",
+      "jeonse_supply_vs_prov_d13",
+      "jeonse_supply_z52",
+      "jeonse_txn_d13",
+      "jeonse_txn_d26",
+      "jeonse_txn_d4",
+      "jeonse_txn_d8",
+      "jeonse_txn_dev156",
+      "jeonse_txn_lvl",
+      "jeonse_txn_ma4dev",
+      "jeonse_txn_vs_prov_d13",
+      "jeonse_txn_z52",
+      "r13",
+      "r26",
+      "r4_over_vol",
+      "r52",
+      "sale_txn_vs_prov_d13",
+      "sale_txn_z52",
+      "trend_t13",
+      "up52",
+      "vol13",
+      "vol52"
+    ],
+    "ridge_alpha": {
+      "4": 10000.0,
+      "8": 30000.0,
+      "13": 30000.0,
+      "20": 100000.0,
+      "26": 100000.0,
+      "39": 100000.0,
+      "52": 100000.0,
+      "78": 100000.0,
+      "104": 100000.0
+    },
+    "conformal_levels": {
+      "4": [
+        0.04999999999999999,
+        0.95
+      ],
+      "8": [
+        0.04999999999999999,
+        0.95
+      ],
+      "13": [
+        0.04999999999999999,
+        0.95
+      ],
+      "20": [
+        0.04999999999999999,
+        0.95
+      ],
+      "26": [
+        0.04999999999999999,
+        0.95
+      ],
+      "39": [
+        0.04999999999999999,
+        0.95
+      ],
+      "52": [
+        0.04999999999999999,
+        0.95
+      ],
+      "78": [
+        0.04999999999999999,
+        0.95
+      ],
+      "104": [
+        0.04999999999999999,
+        0.95
+      ]
+    },
+    "long_horizon_ridge_only_from": 78,
+    "settings": {
+      "first_origin": "2014-01-06",
+      "refit_every": 39,
+      "eval_step": 2,
+      "anchors": [
+        4,
+        8,
+        13,
+        20,
+        26,
+        39,
+        52,
+        78,
+        104
+      ],
+      "seoul_rate_overlay": true,
+      "overlay_max_horizon": 52,
+      "observed_only_labels": true,
+      "interval_target": 0.9
+    },
+    "overlay": {
+      "4": {
+        "slope": -0.0011321233339753507,
+        "signal": 0.6155139221486595,
+        "rate_change_26w": 0.5,
+        "cd_change_26w": 0.3900000000000001,
+        "rate_known_through": "2026-09-26",
+        "rate_source": "저장소 내 스냅샷",
+        "cd_known_through": "2026-09-28"
+      },
+      "8": {
+        "slope": -0.0028095038374047186,
+        "signal": 0.6155139221486595,
+        "rate_change_26w": 0.5,
+        "cd_change_26w": 0.3900000000000001,
+        "rate_known_through": "2026-09-26",
+        "rate_source": "저장소 내 스냅샷",
+        "cd_known_through": "2026-09-28"
+      },
+      "13": {
+        "slope": -0.005603575502020121,
+        "signal": 0.6155139221486595,
+        "rate_change_26w": 0.5,
+        "cd_change_26w": 0.3900000000000001,
+        "rate_known_through": "2026-09-26",
+        "rate_source": "저장소 내 스냅샷",
+        "cd_known_through": "2026-09-28"
+      },
+      "20": {
+        "slope": -0.011017187664810388,
+        "signal": 0.6155139221486595,
+        "rate_change_26w": 0.5,
+        "cd_change_26w": 0.3900000000000001,
+        "rate_known_through": "2026-09-26",
+        "rate_source": "저장소 내 스냅샷",
+        "cd_known_through": "2026-09-28"
+      },
+      "26": {
+        "slope": -0.01483532146006213,
+        "signal": 0.6155139221486595,
+        "rate_change_26w": 0.5,
+        "cd_change_26w": 0.3900000000000001,
+        "rate_known_through": "2026-09-26",
+        "rate_source": "저장소 내 스냅샷",
+        "cd_known_through": "2026-09-28"
+      },
+      "39": {
+        "slope": -0.020140435221322153,
+        "signal": 0.6155139221486595,
+        "rate_change_26w": 0.5,
+        "cd_change_26w": 0.3900000000000001,
+        "rate_known_through": "2026-09-26",
+        "rate_source": "저장소 내 스냅샷",
+        "cd_known_through": "2026-09-28"
+      },
+      "52": {
+        "slope": -0.02667091928135335,
+        "signal": 0.6155139221486595,
+        "rate_change_26w": 0.5,
+        "cd_change_26w": 0.3900000000000001,
+        "rate_known_through": "2026-09-26",
+        "rate_source": "저장소 내 스냅샷",
+        "cd_known_through": "2026-09-28"
+      }
+    },
+    "hash": "a7124c6f59f37f45"
+  },
+  "note": "pre-registered: engine v7, observed-only labels, Seoul rate overlay off from 78w, 90% conformal intervals"
+}

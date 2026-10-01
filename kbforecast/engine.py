@@ -16,13 +16,13 @@ import numpy as np
 import pandas as pd
 
 from . import models as M
-from .evaluation import WFConfig, baseline_predictions, walk_forward
+from .evaluation import WFConfig, baseline_predictions, pooled_mean_baseline, walk_forward
 from .features import FeatureSet, build_features, make_targets
-from .intervals import conformal_quantiles, scale_from_vol
+from .intervals import conformal_quantiles, interval_score, scale_from_vol
 from .kb_panel import KBPanel, seoul_region_keys
 from .overlay import RateSeries, apply_seoul_rate_overlay, rate_change_weekly, rate_signal_weekly
 
-ENGINE_VERSION = "v5"  # bump when model/feature/interval settings change (invalidates on-disk caches)
+ENGINE_VERSION = "v7"  # bump when model/feature/interval settings change (invalidates on-disk caches)
 ANCHORS = (4, 8, 13, 20, 26, 39, 52, 78, 104)
 LONG_HORIZON = 78  # from here on the tree model is dropped: the ridge alone beats the blend (Seoul MAE 6.18 vs 6.36 at 78w, 7.88 vs 8.07 at 104w)
 REL_FEATURES = ("rel13", "rel26", "cs_rank13", "cs_rank26")
@@ -40,7 +40,12 @@ PRUNED_FEATURES = frozenset({
 })
 # validated per-horizon settings: ridge alpha (stronger shrinkage for longer horizons), conformal levels for ~80% coverage
 RIDGE_ALPHA = {4: 10000.0, 8: 30000.0, 13: 30000.0, 20: 100000.0, 26: 100000.0, 39: 100000.0, 52: 100000.0, 78: 100000.0, 104: 100000.0}
-CONFORMAL_LEVELS = {4: (0.07, 0.93), 8: (0.07, 0.93), 13: (0.07, 0.93), 20: (0.05, 0.95), 26: (0.05, 0.95), 39: (0.05, 0.95), 52: (0.05, 0.95), 78: (0.05, 0.95), 104: (0.05, 0.95)}
+# One stated target for every horizon: 90% two-sided intervals (5% / 95% conformal quantiles of the residuals that had closed at each origin).
+# The levels are the nominal ones, not widened to fit past coverage; the realised coverage is reported as measured (validation tab, README).
+INTERVAL_TARGET = 0.90
+CONFORMAL_LEVELS = {h: ((1 - INTERVAL_TARGET) / 2, 1 - (1 - INTERVAL_TARGET) / 2) for h in (4, 8, 13, 20, 26, 39, 52, 78, 104)}
+# The Seoul policy-rate overlay helps at 13-52 weeks but not at 78+ (104w Seoul MAE 7.92 -> 7.98, 208w 13.00 -> 13.22): off from here on by default
+OVERLAY_MAX_HORIZON = 52
 HGB_KW = {
     "default": dict(),
     26: dict(max_iter=300, learning_rate=0.03, max_leaf_nodes=6, min_samples_leaf=400, l2=10.0),
@@ -72,7 +77,7 @@ class EngineFit:
     anchors: tuple[int, ...]
     columns: list[str]
     predictions: dict[int, pd.DataFrame]  # per anchor: walk-forward + live-origin rows with y/pred/lo/hi
-    baselines: dict[int, pd.DataFrame]  # per anchor: rw / drift26 predictions aligned to `predictions`
+    baselines: dict[int, pd.DataFrame]  # per anchor: rw / drift26 / hist_mean (pooled average return of closed labels) predictions aligned to `predictions`
     contributions: dict[int, pd.DataFrame]  # per anchor: ridge-component contribution by feature group (rows = regions)
     hierarchy: pd.DataFrame
     kb_fingerprint: str
@@ -93,11 +98,15 @@ def fit_engine(
     rate: RateSeries | None = None,
     cd: RateSeries | None = None,
     progress: Callable[[int, int, str], None] | None = None,
+    overlay_max_horizon: int = OVERLAY_MAX_HORIZON,
+    observed_only: bool = True,
 ) -> EngineFit:
     """Walk-forward fit at every anchor horizon (also yields the live-origin forecasts and calibrated intervals).
 
     If `rate` is given, Seoul series get the rate overlay (base rate, averaged with the CD rate when `cd` is given; see overlay.py)
-    before intervals are calibrated.
+    before intervals are calibrated, for anchors up to `overlay_max_horizon` weeks (longer anchors keep the raw model forecast and
+    their intervals are calibrated on its own residuals). With `observed_only` (and a panel that records observations) a training or
+    validation label exists only where the origin price and the price h weeks later were actual observations, never filled values.
     """
     fs = build_features(kb, macro_weekly if use_macro else None)
     cols = model_columns(fs, use_macro)
@@ -110,6 +119,7 @@ def fit_engine(
     z_cd = rate_change_weekly(cd, dates) if cd is not None else None
     overlay_info: dict = {}
     vol = 0.5 * fs.X["vol52"] + 0.5 * fs.X["vol13"]
+    observed = kb.observed["sale"] if (observed_only and kb.observed is not None) else None
     preds: dict[int, pd.DataFrame] = {}
     bases: dict[int, pd.DataFrame] = {}
     contrib: dict[int, pd.DataFrame] = {}
@@ -117,9 +127,10 @@ def fit_engine(
         if progress:
             progress(i, len(anchors), f"{h}주 예측 모델 학습·검증 중")
         cfg = WFConfig(horizon=h, first_origin=first_origin, eval_step=eval_step, refit_every=refit_every)
-        pred = walk_forward(fs, cols, blend_model(h), cfg)
-        pred = _append_live_origin(fs, cols, blend_model(h), h, pred, cfg)
-        if z_rate is not None and seoul:
+        y = make_targets(fs.log_price, h, observed)
+        pred = walk_forward(fs, cols, blend_model(h), cfg, y=y)
+        pred = _append_live_origin(fs, cols, blend_model(h), h, pred, cfg, y)
+        if z_rate is not None and seoul and h <= overlay_max_horizon:
             pred, slopes = apply_seoul_rate_overlay(pred, z_rate, h, dates, seoul)
             overlay_info[h] = {
                 "slope": float(slopes.iloc[-1]) if len(slopes) else 0.0,
@@ -133,9 +144,13 @@ def fit_engine(
         lq, uq = CONFORMAL_LEVELS.get(h, (0.05, 0.95))
         preds[h] = conformal_quantiles(pred, scale_from_vol(vol, h), h, dates, lower_q=lq, upper_q=uq, window_weeks=260)
         bases[h] = pd.DataFrame(
-            {"rw": baseline_predictions(fs, h, "rw").reindex(pred.index), "drift26": baseline_predictions(fs, h, "drift26").reindex(pred.index)}
+            {
+                "rw": baseline_predictions(fs, h, "rw").reindex(pred.index),
+                "drift26": baseline_predictions(fs, h, "drift26").reindex(pred.index),
+                "hist_mean": pooled_mean_baseline(fs, h, y).reindex(pred.index),
+            }
         )
-        contrib[h] = _ridge_contributions(fs, cols, h)
+        contrib[h] = _ridge_contributions(fs, cols, h, y)
         if h in overlay_info and not contrib[h].empty:
             live = preds[h].xs(dates[-1], level="date")["overlay"].reindex(contrib[h].index).fillna(0.0) * 100.0
             contrib[h]["서울 금리 보정"] = live
@@ -143,6 +158,9 @@ def fit_engine(
         progress(len(anchors), len(anchors), "완료")
     settings = {"first_origin": first_origin, "refit_every": refit_every, "eval_step": eval_step, "anchors": list(anchors)}
     settings["seoul_rate_overlay"] = bool(overlay_info)
+    settings["overlay_max_horizon"] = overlay_max_horizon
+    settings["observed_only_labels"] = observed is not None
+    settings["interval_target"] = INTERVAL_TARGET
     return EngineFit(fs.log_price, tuple(anchors), cols, preds, bases, contrib, kb.hierarchy, kb.fingerprint, dates[-1], use_macro, settings, overlay_info)
 
 
@@ -159,12 +177,13 @@ def _feature_group_map(fs: FeatureSet, cols: list[str]) -> dict[str, str]:
 GROUP_LABELS = {"own": "자체 모멘텀·변동성", "own2": "자체 모멘텀(보조)", "sentiment": "KB 심리지표", "sent2": "KB 심리지표(보조)", "sent3": "KB 심리 낙폭(고점 대비)", "market": "지역 상대강도", "macro": "거시지표", "jeonse": "전세"}
 
 
-def _ridge_contributions(fs: FeatureSet, cols: list[str], h: int) -> pd.DataFrame:
+def _ridge_contributions(fs: FeatureSet, cols: list[str], h: int, y: pd.Series | None = None) -> pd.DataFrame:
     """Interpretability: the ridge half of the blend, decomposed into (coefficient x standardized feature) by group,
     at the live origin. Values are cumulative-return contributions in percentage points (relative to the mean forecast)."""
     from sklearn.linear_model import Ridge
 
-    X, y = fs.X, make_targets(fs.log_price, h)
+    X = fs.X
+    y = make_targets(fs.log_price, h) if y is None else y
     n = len(fs.log_price)
     date_pos = pd.Series(np.arange(n), index=fs.log_price.index)
     row_pos = date_pos.reindex(X.index.get_level_values("date")).to_numpy()
@@ -185,13 +204,13 @@ def _ridge_contributions(fs: FeatureSet, cols: list[str], h: int) -> pd.DataFram
     return grouped.rename(columns=GROUP_LABELS)
 
 
-def _append_live_origin(fs: FeatureSet, cols: list[str], model_fn: M.ModelFn, h: int, pred: pd.DataFrame, cfg: WFConfig) -> pd.DataFrame:
+def _append_live_origin(fs: FeatureSet, cols: list[str], model_fn: M.ModelFn, h: int, pred: pd.DataFrame, cfg: WFConfig, y: pd.Series | None = None) -> pd.DataFrame:
     last = fs.log_price.index[-1]
     have = pred.index.get_level_values("date")
     if len(pred) and (have == last).any():
         return pred
     X = fs.X
-    y = make_targets(fs.log_price, h)
+    y = make_targets(fs.log_price, h) if y is None else y
     date_pos = pd.Series(np.arange(len(fs.log_price)), index=fs.log_price.index)
     row_pos = date_pos.reindex(X.index.get_level_values("date")).to_numpy()
     usable = X[["r52", "vol52"]].notna().all(axis=1).to_numpy()
@@ -254,6 +273,15 @@ def forecast_region(fit: EngineFit, region: str, horizon: int) -> RegionForecast
     return RegionForecast(region, horizon, last, last_level, path, tbl[["h", "pred_pct", "lo_pct", "hi_pct"]])
 
 
+def _interval_stats(df: pd.DataFrame) -> tuple[float, float, float]:
+    """(coverage, mean width in pp, mean 90% interval score in pp) over rows that have a calibrated interval and a realised outcome."""
+    d = df.dropna(subset=["lo", "hi", "y"])
+    if d.empty:
+        return float("nan"), float("nan"), float("nan")
+    cover = float(((d["y"] >= d["lo"]) & (d["y"] <= d["hi"])).mean())
+    return cover, float((d["hi"] - d["lo"]).mean() * 100), float(interval_score(d["y"], d["lo"], d["hi"]).mean() * 100)
+
+
 def _coverage(df: pd.DataFrame) -> float:
     """Share of realised outcomes inside [lo, hi], counting only rows that actually have a calibrated interval."""
     d = df.dropna(subset=["lo", "hi", "y"])
@@ -284,8 +312,12 @@ def validation_summary(fit: EngineFit, regions: tuple[str, ...] | None, horizons
                 "model_MAE_pp": float(err.abs().mean() * 100),
                 "drift26_MAE_pp": float(e_dr.abs().mean() * 100),
                 "randomwalk_MAE_pp": float(e_rw.abs().mean() * 100),
+                "histmean_MAE_pp": float((df["hist_mean"] - df["y"]).abs().mean() * 100) if "hist_mean" in df and df["hist_mean"].notna().any() else float("nan"),
                 "skill_vs_drift26": float(1 - (err**2).mean() / (e_dr**2).mean()),
-                "interval_coverage": _coverage(df),
+                "interval_coverage": _interval_stats(df)[0],
+                "interval_width_pp": _interval_stats(df)[1],
+                "interval_score90_pp": _interval_stats(df)[2],
+                "interval_n": int(df[["lo", "hi"]].notna().all(axis=1).sum()),
                 "from": df.index.get_level_values("date").min(),
                 "to": df.index.get_level_values("date").max(),
             }

@@ -1,0 +1,21 @@
+horizon,set,MAE_model,MAE_trained_on_filled
+52,Seoul city index,3.9139,3.9328
+52,Seoul 25 districts,4.0891,4.1080
+52,Seoul 2 halves,3.9807,4.0057
+52,Seoul all 28,4.0751,4.0945
+52,All regions,3.8616,3.8618
+78,Seoul city index,6.1758,6.1540
+78,Seoul 25 districts,6.1142,6.0888
+78,Seoul 2 halves,6.0984,6.0720
+78,Seoul all 28,6.1153,6.0899
+78,All regions,6.1729,6.1705
+104,Seoul city index,7.8885,7.9102
+104,Seoul 25 districts,7.9504,7.9584
+104,Seoul 2 halves,7.8306,7.8414
+104,Seoul all 28,7.9396,7.9484
+104,All regions,8.6032,8.5929
+208,Seoul city index,12.3514,12.3481
+208,Seoul 25 districts,13.1494,13.1596
+208,Seoul 2 halves,12.8064,12.8022
+208,Seoul all 28,13.0964,13.1051
+208,All regions,13.3656,13.4070

@@ -7,9 +7,9 @@ import pandas as pd
 from kbforecast.kb_panel import KBPanel, build_hierarchy
 
 
-def make_panel(weeks: int = 420, seed: int = 0) -> KBPanel:
+def make_panel(weeks: int = 420, seed: int = 0, extra_cities: int = 0) -> KBPanel:
     rng = np.random.default_rng(seed)
-    names = ["전국", "서울특별시", "강북14개구", "강북구", "노원구", "강남11개구", "강남구", "서초구", "경기도", "수원시", "성남시"]
+    names = ["전국", "서울특별시", "강북14개구", "강북구", "노원구", "강남11개구", "강남구", "서초구", "경기도", "수원시", "성남시"] + [f"가{i:02d}시" for i in range(extra_cities)]
     hierarchy = build_hierarchy(names)
     index = pd.date_range("2008-04-07", periods=weeks, freq="W-MON")
     common = rng.normal(0.001, 0.004, size=weeks).cumsum()

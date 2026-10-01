@@ -104,3 +104,13 @@ def interval_metrics(df: pd.DataFrame, lower_q: float = 0.10, upper_q: float = 0
         "width_pp": float(width),
         "winkler_pp": float(winkler.mean() * 100),
     }
+
+
+def interval_score(y: np.ndarray, lo: np.ndarray, hi: np.ndarray, alpha: float = 0.10) -> np.ndarray:
+    """Winkler interval score of a (1 - alpha) interval (lower is better): width plus 2/alpha times the miss distance.
+
+    Rewards narrow intervals only as long as they still cover; reported next to coverage and mean width so a method
+    cannot look good by being wide (coverage) or narrow (width) alone. Units of y (log return).
+    """
+    y, lo, hi = np.asarray(y, float), np.asarray(lo, float), np.asarray(hi, float)
+    return (hi - lo) + (2.0 / alpha) * np.maximum(lo - y, 0.0) + (2.0 / alpha) * np.maximum(y - hi, 0.0)
