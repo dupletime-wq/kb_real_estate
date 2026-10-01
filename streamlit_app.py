@@ -300,7 +300,12 @@ def _overlay_note(fit: EngineFit, region: str, horizon: int) -> None:
         return
     anchor = min(fit.anchors, key=lambda a: abs(a - horizon))
     info = fit.overlay.get(anchor)
-    if info is None or region not in seoul_region_keys(fit.hierarchy):
+    if region not in seoul_region_keys(fit.hierarchy):
+        return
+    if info is None:
+        limit = fit.settings.get("overlay_max_horizon")
+        if limit is not None and anchor > limit:
+            st.caption(f"서울 금리 보정은 {limit}주 이하 예측에만 적용합니다. {anchor}주 예측은 보정 없이 모델 예측 그대로입니다 (과거 검증에서 이 기간에는 보정이 오차를 줄이지 못했습니다).")
         return
     try:
         live = fit.predictions[anchor].xs(fit.last_date, level="date").loc[region]
@@ -317,6 +322,35 @@ def _overlay_note(fit: EngineFit, region: str, horizon: int) -> None:
         f"{anchor}주 예측 수익률에 **{adj:+.2f}%p** 반영 (부호는 '금리↑ → 수익률↓'로 제한, 기준금리와 CD91의 26주 변화를 표준화해 평균). "
         "과거 검증에서 서울 평균오차를 3~4% 줄였지만 통계적 유의성은 약합니다(단측 p≈0.1). '예측 근거' 탭과 '검증' 탭에서 보정 전후를 볼 수 있습니다."
     )
+
+
+def _four_year_scenarios(series: pd.Series, region: str) -> None:
+    """4-year (208-week) planning arithmetic under stated annual growth assumptions. Not a forecast, no probabilities attached."""
+    with st.expander("4년 가정 시나리오 (예측이 아님)"):
+        st.caption(
+            "4년(208주) 예측은 검증 표본이 부족해 앱에서 제공하지 않습니다(독립적인 4년 구간이 2개 안팎, 전국 패널에서는 과거 평균수익률 기준선보다 나을 근거가 없음). "
+            "대신 아래는 **직접 정한 연 변화율을 현재 지수에 복리로 적용한 단순 계산**입니다. 어느 시나리오가 얼마나 일어날 법한지(확률)는 이 앱이 알려주지 않습니다."
+        )
+        c1, c2, c3 = st.columns(3)
+        up = c1.number_input("상승 가정 (연 %)", value=4.0, step=0.5, format="%.1f")
+        flat = c2.number_input("정체 가정 (연 %)", value=0.0, step=0.5, format="%.1f")
+        down = c3.number_input("하락 가정 (연 %)", value=-4.0, step=0.5, format="%.1f")
+        last = float(series.iloc[-1])
+        rows = []
+        for name, g in (("상승", up), ("정체", flat), ("하락", down)):
+            row = {"시나리오": name, "연 변화율(가정, %)": g}
+            for year in (1, 2, 3, 4):
+                row[f"{year}년 뒤 지수"] = last * (1 + g / 100.0) ** year
+            row["4년 누적(%)"] = ((1 + g / 100.0) ** 4 - 1) * 100.0
+            rows.append(row)
+        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True,
+                     column_config={c: st.column_config.NumberColumn(format="%.2f") for c in ("연 변화율(가정, %)", "1년 뒤 지수", "2년 뒤 지수", "3년 뒤 지수", "4년 뒤 지수", "4년 누적(%)")})
+        past = (series / series.shift(208) - 1).dropna() * 100.0
+        if len(past) >= 52:
+            st.caption(
+                f"참고(과거 실제 기록, {region}): 지난 4년 구간 수익률은 최소 {past.min():+.1f}% ~ 중앙값 {past.median():+.1f}% ~ 최대 {past.max():+.1f}% "
+                f"(겹치는 구간이 많아 독립 표본 수는 아주 적습니다). 가정을 정할 때의 눈금으로만 쓰세요."
+            )
 
 
 def _rate_scenario(fit: EngineFit, region: str, horizon: int, rate: RateSeries | None, cd: RateSeries | None = None) -> None:
@@ -377,10 +411,11 @@ def _validation_tab(fit: EngineFit, kb: KBPanel, region: str, horizon: int) -> N
     table["개선율(vs 추세연장, %)"] = table["skill_vs_drift26"] * 100
     table = table.rename(
         columns={"horizon": "예측 기간(주)", "n": "검증 표본", "model_MAE_pp": "모델 평균오차(%p)", "drift26_MAE_pp": "추세연장 평균오차(%p)",
-                 "randomwalk_MAE_pp": "무변화 평균오차(%p)", "histmean_MAE_pp": "과거 평균수익률 평균오차(%p)", "interval_coverage": "구간 적중률"}
+                 "randomwalk_MAE_pp": "무변화 평균오차(%p)", "histmean_MAE_pp": "과거 평균수익률 평균오차(%p)", "interval_coverage": "구간 적중률",
+                 "interval_width_pp": "구간 평균 폭(%p)", "interval_score90_pp": "90% 구간점수(%p)"}
     )
     table["구간 적중률"] = table["구간 적중률"] * 100
-    cols = ["대상", "예측 기간(주)", "검증 표본", "모델 평균오차(%p)", "추세연장 평균오차(%p)", "무변화 평균오차(%p)", "과거 평균수익률 평균오차(%p)", "개선율(vs 추세연장, %)", "구간 적중률"]
+    cols = ["대상", "예측 기간(주)", "검증 표본", "모델 평균오차(%p)", "추세연장 평균오차(%p)", "무변화 평균오차(%p)", "과거 평균수익률 평균오차(%p)", "개선율(vs 추세연장, %)", "구간 적중률", "구간 평균 폭(%p)", "90% 구간점수(%p)"]
     st.dataframe(
         table[cols], width="stretch", hide_index=True,
         column_config={c: st.column_config.NumberColumn(format="%.2f") for c in cols[3:]} | {"구간 적중률": st.column_config.NumberColumn(format="%.1f%%")},
@@ -405,7 +440,8 @@ def _validation_tab(fit: EngineFit, kb: KBPanel, region: str, horizon: int) -> N
     st.caption(
         f"매 시점마다 그 시점까지의 데이터만으로 다시 학습해 미래를 예측하고 실제와 비교한 결과입니다 (walk-forward, {first} ~ {last}). "
         "평균오차는 예측 기간 누적 수익률의 절대오차(%p)이며, '추세연장'은 최근 26주 상승률을 그대로 이어 붙인 단순 기준선입니다. "
-        "구간 적중률은 실제값이 예측구간(80% 목표) 안에 들어온 비율입니다 — 급변 국면에서는 목표보다 낮아질 수 있습니다."
+        "예측구간의 목표 적중률은 모든 기간에서 90%입니다(각 시점에 이미 실현된 잔차의 5%·95% 분위로 계산, 과거 결과에 맞춰 넓히지 않음). '구간 적중률'은 실제로 들어온 비율이라 "
+        "목표보다 낮으면 낮은 대로 표시합니다. 구간 평균 폭과 90% 구간점수(낮을수록 좋음, 폭 + 벗어난 거리에 대한 벌점)를 함께 보세요. 검증에는 시점·목표 시점 가격이 모두 실제 관측인 표본만 쓰는 것이 기본입니다."
     )
 
 
@@ -563,6 +599,7 @@ def main() -> None:
                 )
             _overlay_note(fit, region, horizon)
             _rate_scenario(fit, region, horizon, rate, cd)
+            _four_year_scenarios(series, region)
             with st.expander("기간별 예측 수익률", expanded=False):
                 st.dataframe(
                     fc.anchor_table.rename(columns={"h": "기간(주)", "pred_pct": "예측 수익률(%)", "lo_pct": "하단(%)", "hi_pct": "상단(%)"}),

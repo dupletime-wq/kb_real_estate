@@ -134,3 +134,13 @@ def test_pooled_mean_baseline_is_causal_and_uses_closed_labels_only():
     closed = fs.log_price.index[: pos - h + 1]
     sel = y.loc[(closed, slice(None))][usable.loc[(closed, slice(None))]].dropna()
     assert np.isclose(float(a.iloc[0]), float(sel.mean()), atol=1e-6)  # exactly the mean of labels that had closed by `cut`
+
+
+def test_interval_score_rewards_covering_and_penalises_misses():
+    from kbforecast.intervals import interval_score
+
+    y, lo, hi = np.array([0.0, 0.0, 0.5]), np.array([-0.1, 0.1, -0.1]), np.array([0.1, 0.2, 0.1])
+    s = interval_score(y, lo, hi, alpha=0.10)
+    assert np.isclose(s[0], 0.2)  # covered: just the width
+    assert np.isclose(s[1], 0.1 + 20 * 0.1) and np.isclose(s[2], 0.2 + 20 * 0.4)  # missed: width + (2/alpha) * distance
+

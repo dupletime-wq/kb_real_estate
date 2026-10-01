@@ -78,13 +78,13 @@ def baseline_predictions(fs: FeatureSet, horizon: int, kind: str) -> pd.Series:
     raise ValueError(kind)
 
 
-def pooled_mean_baseline(fs: FeatureSet, horizon: int) -> pd.Series:
+def pooled_mean_baseline(fs: FeatureSet, horizon: int, y: pd.Series | None = None) -> pd.Series:
     """Unconditional forecast: the pooled average h-week return over all labels that had closed by each origin (causal).
 
     At 2-4 year horizons "no change" is a straw man (prices drift up with inflation and growth); the honest question is whether
     the model beats simply predicting the historical average return. Long-indexed like the feature frame.
     """
-    y = make_targets(fs.log_price, horizon)
+    y = make_targets(fs.log_price, horizon) if y is None else y
     ok = _usable(fs.X) & y.notna()
     dates = fs.log_price.index
     total = y.where(ok).groupby(level="date").sum().reindex(dates).fillna(0.0).cumsum()
