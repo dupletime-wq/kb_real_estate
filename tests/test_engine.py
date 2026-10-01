@@ -164,3 +164,15 @@ def test_engine_overlay_stops_at_the_cutoff_and_labels_use_observed_prices_only(
     realised = fit.predictions[13].dropna(subset=["y"])
     origin_dates = realised.index.get_level_values("date")
     assert not ((origin_dates == filled_week) | (origin_dates == filled_week - pd.Timedelta(weeks=13))).any()  # no label touches a filled price
+
+
+def test_validation_table_has_the_columns_the_app_shows():
+    from kbforecast.engine import fit_engine
+    from kbforecast.report import VALIDATION_COLUMNS, validation_table
+
+    kb = make_panel(extra_cities=60)
+    fit = fit_engine(kb, anchors=(13, 52), first_origin="2013-01-07", refit_every=52, eval_step=4)
+    table, cols = validation_table(fit, "서울특별시", ("서울특별시", "강남구"), (13, 26, 52, 104))
+    assert tuple(cols) == VALIDATION_COLUMNS  # nothing silently dropped
+    assert set(table["예측 기간(주)"]) == {13, 52}  # horizons the fit does not have are skipped
+    assert {"구간 평균 폭(%p)", "90% 구간점수(%p)", "과거 평균수익률 평균오차(%p)"} <= set(table.columns)

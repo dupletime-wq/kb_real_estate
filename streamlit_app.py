@@ -17,6 +17,7 @@ from kbforecast.hub import HubData, HubReport, extend_kb_panel, fetch_hub
 from kbforecast.indicators import IndicatorResult, evaluate_indicators
 from kbforecast.kb_panel import KBPanel, parse_kb_panel, seoul_region_keys
 from kbforecast.macro import ecos_api_key, load_macro, macro_weekly
+from kbforecast.report import validation_table
 from kbforecast.overlay import RateSeries, load_base_rate, load_cd91, scenario_adjustments
 
 APP_TITLE = "KB 부동산 시세 예측 대시보드"
@@ -399,29 +400,16 @@ def _rate_scenario(fit: EngineFit, region: str, horizon: int, rate: RateSeries |
 
 def _validation_tab(fit: EngineFit, kb: KBPanel, region: str, horizon: int) -> None:
     seoul = tuple(sorted(seoul_region_keys(kb.hierarchy)))
-    frames = []
-    for label, regions in ((f"{region} (선택 지역)", (region,)), ("서울 28개 지역 평균", seoul), ("전국 패널 전체", None)):
-        v = validation_summary(fit, regions, horizons=tuple(h for h in HORIZONS if h in fit.anchors))
-        if not v.empty:
-            frames.append(v.assign(대상=label))
-    if not frames:
+    table, cols = validation_table(fit, region, seoul, HORIZONS)
+    if table.empty:
         st.info("검증 결과가 없습니다.")
         return
-    table = pd.concat(frames)
-    table["개선율(vs 추세연장, %)"] = table["skill_vs_drift26"] * 100
-    table = table.rename(
-        columns={"horizon": "예측 기간(주)", "n": "검증 표본", "model_MAE_pp": "모델 평균오차(%p)", "drift26_MAE_pp": "추세연장 평균오차(%p)",
-                 "randomwalk_MAE_pp": "무변화 평균오차(%p)", "histmean_MAE_pp": "과거 평균수익률 평균오차(%p)", "interval_coverage": "구간 적중률",
-                 "interval_width_pp": "구간 평균 폭(%p)", "interval_score90_pp": "90% 구간점수(%p)"}
-    )
-    table["구간 적중률"] = table["구간 적중률"] * 100
-    cols = ["대상", "예측 기간(주)", "검증 표본", "모델 평균오차(%p)", "추세연장 평균오차(%p)", "무변화 평균오차(%p)", "과거 평균수익률 평균오차(%p)", "개선율(vs 추세연장, %)", "구간 적중률", "구간 평균 폭(%p)", "90% 구간점수(%p)"]
     st.dataframe(
         table[cols], width="stretch", hide_index=True,
         column_config={c: st.column_config.NumberColumn(format="%.2f") for c in cols[3:]} | {"구간 적중률": st.column_config.NumberColumn(format="%.1f%%")},
     )
     if fit.overlay:
-        seoul_rows = table[table["대상"] == "서울 28개 지역 평균"].copy()
+        seoul_rows = table[(table["대상"] == "서울 28개 지역 평균") & table["raw_model_MAE_pp"].notna()].copy() if "raw_model_MAE_pp" in table else table.iloc[0:0]
         if not seoul_rows.empty:
             seoul_rows["보정 효과(%)"] = (seoul_rows["모델 평균오차(%p)"] / seoul_rows["raw_model_MAE_pp"] - 1) * 100
             st.markdown("**서울 금리 보정 전/후 (서울 28개 지역 평균 오차, %p)**")
