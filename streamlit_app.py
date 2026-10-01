@@ -377,10 +377,10 @@ def _validation_tab(fit: EngineFit, kb: KBPanel, region: str, horizon: int) -> N
     table["개선율(vs 추세연장, %)"] = table["skill_vs_drift26"] * 100
     table = table.rename(
         columns={"horizon": "예측 기간(주)", "n": "검증 표본", "model_MAE_pp": "모델 평균오차(%p)", "drift26_MAE_pp": "추세연장 평균오차(%p)",
-                 "randomwalk_MAE_pp": "무변화 평균오차(%p)", "interval_coverage": "구간 적중률"}
+                 "randomwalk_MAE_pp": "무변화 평균오차(%p)", "histmean_MAE_pp": "과거 평균수익률 평균오차(%p)", "interval_coverage": "구간 적중률"}
     )
     table["구간 적중률"] = table["구간 적중률"] * 100
-    cols = ["대상", "예측 기간(주)", "검증 표본", "모델 평균오차(%p)", "추세연장 평균오차(%p)", "무변화 평균오차(%p)", "개선율(vs 추세연장, %)", "구간 적중률"]
+    cols = ["대상", "예측 기간(주)", "검증 표본", "모델 평균오차(%p)", "추세연장 평균오차(%p)", "무변화 평균오차(%p)", "과거 평균수익률 평균오차(%p)", "개선율(vs 추세연장, %)", "구간 적중률"]
     st.dataframe(
         table[cols], width="stretch", hide_index=True,
         column_config={c: st.column_config.NumberColumn(format="%.2f") for c in cols[3:]} | {"구간 적중률": st.column_config.NumberColumn(format="%.1f%%")},
@@ -557,8 +557,9 @@ def main() -> None:
             st.plotly_chart(make_forecast_chart(series, fc.path, f"KB {target_label}"), width="stretch")
             if horizon >= 78:
                 st.warning(
-                    "104주(2년) 예측은 과거 검증에서 독립적인 2년 구간이 5개 안팎뿐입니다. 서울에서는 무변화 기준선보다 유의하게 낫지만(평균오차 7.9%p vs 12.8%p) "
-                    "전국 평균에서는 무변화와 거의 차이가 없고(8.6%p vs 9.3%p), 예측구간이 넓으며 실제 적중률은 목표 80%보다 낮은 75% 안팎입니다. 참고용으로만 보세요."
+                    "104주(2년) 예측은 과거 검증에서 독립적인 2년 구간이 5개 안팎뿐입니다. 2~4년 뒤에는 '무변화'가 아니라 '과거 평균 상승률'이 현실적인 비교 기준이며, "
+                    "그 기준 대비 개선은 서울 약 18%(평균오차 7.9%p vs 9.7%p), 전국 약 10%(8.6%p vs 9.6%p)로 52주(서울 27%)보다 작습니다(검증 탭 참고). "
+                    "예측구간은 넓고 실제 적중률은 목표(90%)보다 낮은 75% 안팎입니다. 참고용으로만 보세요."
                 )
             _overlay_note(fit, region, horizon)
             _rate_scenario(fit, region, horizon, rate, cd)

@@ -16,13 +16,13 @@ import numpy as np
 import pandas as pd
 
 from . import models as M
-from .evaluation import WFConfig, baseline_predictions, walk_forward
+from .evaluation import WFConfig, baseline_predictions, pooled_mean_baseline, walk_forward
 from .features import FeatureSet, build_features, make_targets
 from .intervals import conformal_quantiles, scale_from_vol
 from .kb_panel import KBPanel, seoul_region_keys
 from .overlay import RateSeries, apply_seoul_rate_overlay, rate_change_weekly, rate_signal_weekly
 
-ENGINE_VERSION = "v5"  # bump when model/feature/interval settings change (invalidates on-disk caches)
+ENGINE_VERSION = "v6"  # bump when model/feature/interval settings change (invalidates on-disk caches)
 ANCHORS = (4, 8, 13, 20, 26, 39, 52, 78, 104)
 LONG_HORIZON = 78  # from here on the tree model is dropped: the ridge alone beats the blend (Seoul MAE 6.18 vs 6.36 at 78w, 7.88 vs 8.07 at 104w)
 REL_FEATURES = ("rel13", "rel26", "cs_rank13", "cs_rank26")
@@ -72,7 +72,7 @@ class EngineFit:
     anchors: tuple[int, ...]
     columns: list[str]
     predictions: dict[int, pd.DataFrame]  # per anchor: walk-forward + live-origin rows with y/pred/lo/hi
-    baselines: dict[int, pd.DataFrame]  # per anchor: rw / drift26 predictions aligned to `predictions`
+    baselines: dict[int, pd.DataFrame]  # per anchor: rw / drift26 / hist_mean (pooled average return of closed labels) predictions aligned to `predictions`
     contributions: dict[int, pd.DataFrame]  # per anchor: ridge-component contribution by feature group (rows = regions)
     hierarchy: pd.DataFrame
     kb_fingerprint: str
@@ -133,7 +133,11 @@ def fit_engine(
         lq, uq = CONFORMAL_LEVELS.get(h, (0.05, 0.95))
         preds[h] = conformal_quantiles(pred, scale_from_vol(vol, h), h, dates, lower_q=lq, upper_q=uq, window_weeks=260)
         bases[h] = pd.DataFrame(
-            {"rw": baseline_predictions(fs, h, "rw").reindex(pred.index), "drift26": baseline_predictions(fs, h, "drift26").reindex(pred.index)}
+            {
+                "rw": baseline_predictions(fs, h, "rw").reindex(pred.index),
+                "drift26": baseline_predictions(fs, h, "drift26").reindex(pred.index),
+                "hist_mean": pooled_mean_baseline(fs, h).reindex(pred.index),
+            }
         )
         contrib[h] = _ridge_contributions(fs, cols, h)
         if h in overlay_info and not contrib[h].empty:
@@ -284,6 +288,7 @@ def validation_summary(fit: EngineFit, regions: tuple[str, ...] | None, horizons
                 "model_MAE_pp": float(err.abs().mean() * 100),
                 "drift26_MAE_pp": float(e_dr.abs().mean() * 100),
                 "randomwalk_MAE_pp": float(e_rw.abs().mean() * 100),
+                "histmean_MAE_pp": float((df["hist_mean"] - df["y"]).abs().mean() * 100) if "hist_mean" in df and df["hist_mean"].notna().any() else float("nan"),
                 "skill_vs_drift26": float(1 - (err**2).mean() / (e_dr**2).mean()),
                 "interval_coverage": _coverage(df),
                 "from": df.index.get_level_values("date").min(),

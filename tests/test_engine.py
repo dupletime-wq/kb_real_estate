@@ -114,3 +114,23 @@ def test_long_horizons_use_the_ridge_alone():
     ridge_pred = M.ridge_model(RIDGE_ALPHA[LONG_HORIZON])(X, y, Xp)
     np.testing.assert_allclose(long_pred, ridge_pred)
     assert not np.allclose(blend_model(26)(X, y, Xp), M.ridge_model(RIDGE_ALPHA[26])(X, y, Xp))  # shorter horizons still blend in the trees
+
+
+def test_pooled_mean_baseline_is_causal_and_uses_closed_labels_only():
+    from kbforecast.evaluation import pooled_mean_baseline
+
+    kb = make_panel()
+    fs = build_features(kb)
+    h = 13
+    base = pooled_mean_baseline(fs, h)
+    cut = kb.sale.index[300]
+    kb2 = KBPanel(kb.sale.loc[:cut], kb.jeonse.loc[:cut], {k: v.loc[:cut] for k, v in kb.sentiment.items()}, kb.hierarchy, "x", ())
+    base2 = pooled_mean_baseline(build_features(kb2), h)
+    a, b = base.xs(cut, level="date"), base2.xs(cut, level="date")
+    pd.testing.assert_series_equal(a.sort_index(), b.sort_index(), check_exact=False, atol=1e-6)  # unchanged by cutting the future
+    y = make_targets(fs.log_price, h)
+    usable = fs.X[["r52", "vol52"]].notna().all(axis=1)
+    pos = list(fs.log_price.index).index(cut)
+    closed = fs.log_price.index[: pos - h + 1]
+    sel = y.loc[(closed, slice(None))][usable.loc[(closed, slice(None))]].dropna()
+    assert np.isclose(float(a.iloc[0]), float(sel.mean()), atol=1e-6)  # exactly the mean of labels that had closed by `cut`
