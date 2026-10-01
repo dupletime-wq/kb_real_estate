@@ -28,6 +28,7 @@ import pandas as pd
 
 ENDPOINT = "https://apis.data.go.kr/1613000/RTMSDataSvcAptTrade/getRTMSDataSvcAptTrade"
 PAGE_ROWS = 1000
+SEOUL_GROUPS = ("강북14개구", "강남11개구")  # same names as kb_panel.SEOUL_GROUPS
 SEOUL_GU_CODES = {
     "종로구": "11110", "중구": "11140", "용산구": "11170", "성동구": "11200", "광진구": "11215", "동대문구": "11230", "중랑구": "11260",
     "성북구": "11290", "강북구": "11305", "도봉구": "11320", "노원구": "11350", "은평구": "11380", "서대문구": "11410", "마포구": "11440",
@@ -36,8 +37,9 @@ SEOUL_GU_CODES = {
 }
 COUNT_COLUMNS = ["sgg_cd", "deal_date", "n_all", "n_cancelled", "n_registered", "n_direct"]
 # Reporting deadline after the contract date: 60 days before the 2020 amendment, 30 days after (the exact effective date is not verified here).
+# Contracts made before the amendment could still be reported for up to 60 days after it, so the shorter lag is only used from 2020-05-25 on.
 ASSUMED_LAG_WEEKS = {"before_2020": 12, "from_2020": 8}
-LAG_SWITCH = pd.Timestamp("2020-03-01")
+LAG_SWITCH = pd.Timestamp("2020-05-25")  # as-of date from which the shorter lag applies
 
 Getter = Callable[[str, str], str]  # (sgg_cd, deal_ym) page -> raw XML; see `http_getter`
 
@@ -94,6 +96,51 @@ def fetch_month(get: Callable[[str, str, int], str], sgg_cd: str, deal_ym: str) 
             break
         page += 1
     return pd.DataFrame(rows)
+
+
+def weekly_net_and_gross(history: pd.DataFrame, week_ends: pd.DatetimeIndex) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Weekly contract counts per district code on the given week-ending dates (a week = the 7 days ending on that date).
+
+    net = reported deals minus those marked cancelled, gross = all reported deals. Cancelled rows only exist from 2020 on (older
+    months were cleaned of them), so only `net` has the same meaning in every year; `gross` is the sensitivity variant.
+    """
+    days = pd.to_datetime(history["deal_date"])
+    out = []
+    for column in (history["n_all"] - history["n_cancelled"], history["n_all"]):
+        daily = column.groupby([history["sgg_cd"], days]).sum().unstack(0).fillna(0.0)
+        daily = daily.reindex(pd.date_range(min(daily.index.min(), week_ends.min() - pd.Timedelta(days=6)), max(daily.index.max(), week_ends.max()), freq="D"), fill_value=0.0)
+        weekly = daily.rolling(7, min_periods=7).sum().reindex(week_ends)
+        out.append(weekly)
+    return out[0], out[1]
+
+
+def seoul_weekly(weekly: pd.DataFrame, hierarchy: pd.DataFrame) -> pd.DataFrame:
+    """Weekly counts keyed like the KB panel: 25 districts, the two halves (sum of members) and the city (sum of all)."""
+    by_name = weekly.rename(columns={code: name for name, code in SEOUL_GU_CODES.items()})
+    out = by_name.copy()
+    gu = hierarchy[(hierarchy["province"] == "서울특별시") & (hierarchy["level"] == "gu")]
+    for group in SEOUL_GROUPS:
+        members = [k for k in gu.index[gu["parent"] == group] if k in by_name.columns]
+        out[group] = by_name[members].sum(axis=1, min_count=len(members)) if members else np.nan
+    out["서울특별시"] = by_name.sum(axis=1, min_count=by_name.shape[1])
+    return out
+
+
+def volume_features(weekly: pd.DataFrame, extra_lag_weeks: int = 0) -> dict[str, pd.DataFrame]:
+    """Point-in-time features at every KB week from the weekly contract counts (see module docstring)."""
+    dates = weekly.index
+    vol4 = weekly.rolling(4, min_periods=4).sum()
+    base = vol4.rolling(156, min_periods=104).mean()
+    lag = np.where(dates >= LAG_SWITCH, ASSUMED_LAG_WEEKS["from_2020"], ASSUMED_LAG_WEEKS["before_2020"]) + extra_lag_weeks
+    j = np.arange(len(dates)) - lag  # position of the newest week that counts as known at each as-of date
+    ok = j >= 13
+    jj = np.where(ok, j, 0)
+    jj13 = np.where(ok, j - 13, 0)
+    cur = vol4.to_numpy()[jj]
+    ratio = np.log((cur + 1.0) / (base.to_numpy()[jj] + 1.0))
+    chg = np.log((cur + 1.0) / (vol4.to_numpy()[jj13] + 1.0))
+    ratio[~ok], chg[~ok] = np.nan, np.nan
+    return {"tv_ratio": pd.DataFrame(ratio, index=dates, columns=weekly.columns), "tv_chg13": pd.DataFrame(chg, index=dates, columns=weekly.columns)}
 
 
 def daily_counts(raw: pd.DataFrame, sgg_cd: str) -> pd.DataFrame:
@@ -171,7 +218,7 @@ def write_snapshot(counts: pd.DataFrame, root: Path, months: list[str], commit: 
 
 def as_known_at(history: pd.DataFrame, as_of: pd.Timestamp, lag_weeks: dict[str, int] | None = None) -> pd.DataFrame:
     """Assumed-lag reconstruction of what a volume series could have shown at `as_of` from FINAL history: only contract days up to
-    as_of minus the assumed reporting+publication lag (12 weeks before 2020-03, 8 weeks after; assumptions, not measured). Cancelled
+    as_of minus the assumed reporting+publication lag (12 weeks before 2020-05-25, 8 weeks after; assumptions, not measured). Cancelled
     deals are kept (cancellations were not yet known), see the `n_all` column."""
     lag_weeks = lag_weeks or ASSUMED_LAG_WEEKS
     weeks = lag_weeks["from_2020"] if as_of >= LAG_SWITCH else lag_weeks["before_2020"]

@@ -73,3 +73,36 @@ def test_failed_district_months_are_retried_once_then_reported_not_dropped_silen
     assert failed == ["11110_202508"]  # reported
     assert attempts[("11110", "202507")] == 2 and "11110" in set(counts["sgg_cd"])  # the flaky one succeeded on the second pass
     assert counts["sgg_cd"].nunique() == 25
+
+
+def test_weekly_counts_net_vs_gross_and_week_boundaries():
+    from kbforecast.trades import weekly_net_and_gross
+
+    hist = pd.DataFrame({"sgg_cd": ["11680"] * 3, "deal_date": ["2024-01-01", "2024-01-03", "2024-01-08"], "n_all": [5, 4, 2], "n_cancelled": [1, 0, 2]})
+    ends = pd.DatetimeIndex(["2024-01-07", "2024-01-14"])
+    net, gross = weekly_net_and_gross(hist, ends)
+    assert gross.loc["2024-01-07", "11680"] == 9 and net.loc["2024-01-07", "11680"] == 8  # days 01-01..01-07
+    assert gross.loc["2024-01-14", "11680"] == 2 and net.loc["2024-01-14", "11680"] == 0  # 01-08 only, all cancelled
+
+
+def test_volume_features_use_only_weeks_old_enough_to_be_reported():
+    import numpy as np
+
+    from kbforecast.trades import ASSUMED_LAG_WEEKS, volume_features
+
+    idx = pd.date_range("2015-01-05", "2022-12-26", freq="W-MON")
+    rng = np.random.default_rng(1)
+    weekly = pd.DataFrame(rng.poisson(30, size=(len(idx), 2)).astype(float), index=idx, columns=["a", "b"])
+    base = volume_features(weekly)
+    # cutting off (or rewriting) the newest weeks leaves every earlier as-of feature unchanged ...
+    cut = len(idx) - 40
+    pd.testing.assert_frame_equal(volume_features(weekly.iloc[:cut])["tv_ratio"], base["tv_ratio"].iloc[:cut])
+    # ... and an as-of date does not react to weeks newer than the assumed lag (12 weeks before 2020-05-25, 8 after)
+    t = idx.get_loc(pd.Timestamp("2018-06-04"))
+    changed = weekly.copy()
+    changed.iloc[t - ASSUMED_LAG_WEEKS["before_2020"] + 1 : t + 1] *= 5.0  # weeks still inside the reporting window
+    after = volume_features(changed)
+    assert after["tv_ratio"].iloc[t].equals(base["tv_ratio"].iloc[t])
+    changed2 = weekly.copy()
+    changed2.iloc[t - ASSUMED_LAG_WEEKS["before_2020"]] *= 5.0  # the newest week that counts as known
+    assert not volume_features(changed2)["tv_ratio"].iloc[t].equals(base["tv_ratio"].iloc[t])

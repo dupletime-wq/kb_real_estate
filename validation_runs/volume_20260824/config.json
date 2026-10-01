@@ -1,0 +1,24 @@
+{
+  "script": "scripts/validate_volume.py",
+  "git_commit": "435e107b575ba06e0f6d6f30d8b8530c589522b8+dirty",
+  "history_file": "trade_history/2026-10-01/seoul_daily_counts.csv.gz",
+  "data_fingerprint": "64e4977b6f74e4c38432c9bd18e5dd87947720e7b962e91bc04be021cec2c719",
+  "last_date": "2026-08-24",
+  "lag_weeks": {
+    "before_2020": 12,
+    "from_2020": 8
+  },
+  "lag_switch_asof": "2020-05-25",
+  "features": [
+    "tv_ratio",
+    "tv_chg13"
+  ],
+  "horizons": [
+    13,
+    26,
+    52
+  ],
+  "labels": "observed-only",
+  "refit_every": 26,
+  "eval_step": 2
+}
