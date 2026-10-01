@@ -1,0 +1,31 @@
+horizon,set,model,n,MAE,RMSE,bias
+104,Seoul city index,model,112,8.5854,10.3832,0.4668
+104,Seoul city index,combo,112,8.5854,10.3832,0.4668
+104,Seoul city index,own_shrunk,112,11.5686,13.1388,-0.3455
+104,Seoul city index,province_shrunk,112,11.5561,13.1276,-0.4639
+104,Seoul city index,pooled_mean,112,11.4190,12.9536,-0.6267
+104,Seoul city index,no_change,112,12.0041,14.2014,-6.4089
+104,Seoul 25 districts,model,2800,8.9493,10.9471,0.6969
+104,Seoul 25 districts,combo,2800,8.9493,10.9471,0.6969
+104,Seoul 25 districts,own_shrunk,2800,12.0646,13.8916,-0.0871
+104,Seoul 25 districts,province_shrunk,2800,12.0918,13.9108,-0.0740
+104,Seoul 25 districts,pooled_mean,2800,11.9365,13.7487,-0.2368
+104,Seoul 25 districts,no_change,2800,11.9895,14.7697,-6.0190
+104,Seoul 2 halves,model,224,8.5457,10.5068,0.5647
+104,Seoul 2 halves,combo,224,8.5457,10.5068,0.5647
+104,Seoul 2 halves,own_shrunk,224,11.8374,13.4727,-0.2579
+104,Seoul 2 halves,province_shrunk,224,11.8309,13.4718,-0.3622
+104,Seoul 2 halves,pooled_mean,224,11.6864,13.2996,-0.5250
+104,Seoul 2 halves,no_change,224,12.1066,14.4706,-6.3072
+104,Seoul all 28,model,3136,8.9074,10.8966,0.6792
+104,Seoul all 28,combo,3136,8.9074,10.8966,0.6792
+104,Seoul all 28,own_shrunk,3136,12.0307,13.8358,-0.1085
+104,Seoul all 28,province_shrunk,3136,12.0540,13.8526,-0.1085
+104,Seoul all 28,pooled_mean,3136,11.9001,13.6894,-0.2713
+104,Seoul all 28,no_change,3136,11.9984,14.7286,-6.0535
+104,All regions,model,20708,10.8550,12.9529,3.5439
+104,All regions,combo,20708,10.8550,12.9529,3.5439
+104,All regions,own_shrunk,20708,12.6869,14.8721,3.2460
+104,All regions,province_shrunk,20708,12.6667,14.8103,3.3814
+104,All regions,pooled_mean,20708,12.6310,14.6431,3.3951
+104,All regions,no_change,20708,10.6902,13.9175,-2.3870

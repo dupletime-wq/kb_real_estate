@@ -1,0 +1,135 @@
+{
+  "script": "scripts/validate_long.py",
+  "git_commit": "a48c2dbbaf1a12d33cb097f5ce8bd6683353f064+dirty",
+  "data_fingerprint": "64e4977b6f74e4c38432c9bd18e5dd87947720e7b962e91bc04be021cec2c719",
+  "last_date": "2026-08-24",
+  "labels": "observed",
+  "engine_version": "v7",
+  "feature_columns": [
+    "r1",
+    "r4",
+    "r8",
+    "acc13",
+    "acc26",
+    "r2",
+    "r6",
+    "r39",
+    "buyer_lvl",
+    "buyer_d4",
+    "buyer_d13",
+    "sale_txn_lvl",
+    "sale_txn_d4",
+    "sale_txn_d13",
+    "jeonse_supply_lvl",
+    "jeonse_supply_d4",
+    "jeonse_supply_d13",
+    "buyer_d8",
+    "buyer_d26",
+    "buyer_ma4dev",
+    "buyer_dev156",
+    "sale_txn_d8",
+    "sale_txn_d26",
+    "sale_txn_ma4dev",
+    "sale_txn_dev156",
+    "jeonse_supply_d8",
+    "jeonse_supply_d26",
+    "jeonse_supply_ma4dev",
+    "jeonse_supply_dev156",
+    "buyer_dd26",
+    "buyer_dd52",
+    "buyer_up26",
+    "sale_txn_dd26",
+    "jeonse_supply_dd26",
+    "jeonse_txn_dd26",
+    "rel13",
+    "rel26",
+    "cs_rank13",
+    "cs_rank26"
+  ],
+  "anchors": [
+    4,
+    8,
+    13,
+    20,
+    26,
+    39,
+    52,
+    78,
+    104
+  ],
+  "ridge_alpha": {
+    "4": 10000.0,
+    "8": 30000.0,
+    "13": 30000.0,
+    "20": 100000.0,
+    "26": 100000.0,
+    "39": 100000.0,
+    "52": 100000.0,
+    "78": 100000.0,
+    "104": 100000.0
+  },
+  "refit_every": 26,
+  "eval_step": 2,
+  "first_origin": "2014-01-06",
+  "baseline_shrink": 0.5,
+  "interval_levels": {
+    "4": [
+      0.04999999999999999,
+      0.95
+    ],
+    "8": [
+      0.04999999999999999,
+      0.95
+    ],
+    "13": [
+      0.04999999999999999,
+      0.95
+    ],
+    "20": [
+      0.04999999999999999,
+      0.95
+    ],
+    "26": [
+      0.04999999999999999,
+      0.95
+    ],
+    "39": [
+      0.04999999999999999,
+      0.95
+    ],
+    "52": [
+      0.04999999999999999,
+      0.95
+    ],
+    "78": [
+      0.04999999999999999,
+      0.95
+    ],
+    "104": [
+      0.04999999999999999,
+      0.95
+    ]
+  },
+  "interval_window_weeks": 260,
+  "combo": {
+    "horizon": 104,
+    "internal_end": "2017-12-31",
+    "external_start": "2020-01-06",
+    "weight_grid": [
+      0.0,
+      0.25,
+      0.5,
+      0.75,
+      1.0
+    ],
+    "internal_criterion_Seoul28_plus_All_MAE": {
+      "0.0": 17.025287327089327,
+      "0.25": 14.115423531429467,
+      "0.5": 11.490478499842553,
+      "0.75": 9.914525552096759,
+      "1.0": 9.721947285938999
+    },
+    "chosen_weight_on_ridge": 1.0,
+    "chosen_before_external_evaluation": true
+  }
+}

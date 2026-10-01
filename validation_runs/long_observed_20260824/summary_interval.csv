@@ -1,0 +1,33 @@
+horizon,set,intervals_from,n,coverage,width,score90
+52,Seoul city index,raw model,253,0.8063,20.9169,32.0942
+52,Seoul city index,model + overlay,253,0.8261,20.8471,29.8021
+52,Seoul 25 districts,raw model,6325,0.8617,27.2801,35.3628
+52,Seoul 25 districts,model + overlay,6325,0.8781,27.1882,34.3007
+52,Seoul all 28,raw model,7084,0.8556,26.6390,35.0971
+52,Seoul all 28,model + overlay,7084,0.8718,26.5493,33.9124
+52,All regions,raw model,46363,0.8414,24.1883,34.1507
+52,All regions,model + overlay,46363,0.8419,24.1162,33.9802
+78,Seoul city index,raw model,229,0.8166,32.8230,49.8618
+78,Seoul city index,model + overlay,229,0.8166,32.7933,49.8321
+78,Seoul 25 districts,raw model,5725,0.8613,42.9044,56.8192
+78,Seoul 25 districts,model + overlay,5725,0.8611,42.8651,56.7444
+78,Seoul all 28,raw model,6412,0.8589,41.8903,56.1217
+78,Seoul all 28,model + overlay,6412,0.8587,41.8519,56.0516
+78,All regions,raw model,41995,0.7862,39.5764,61.3176
+78,All regions,model + overlay,41995,0.7851,39.5443,61.3643
+104,Seoul city index,raw model,205,0.7024,47.4304,78.0271
+104,Seoul city index,model + overlay,205,0.7024,47.4265,78.0232
+104,Seoul 25 districts,raw model,5125,0.7861,62.3493,84.8571
+104,Seoul 25 districts,model + overlay,5125,0.7867,62.3437,84.8404
+104,Seoul all 28,raw model,5740,0.7780,60.8503,84.1524
+104,Seoul all 28,model + overlay,5740,0.7786,60.8449,84.1370
+104,All regions,raw model,37660,0.7473,58.2198,93.1462
+104,All regions,model + overlay,37660,0.7472,58.2158,93.1603
+208,Seoul city index,raw model,110,0.8818,99.5682,133.9287
+208,Seoul city index,model + overlay,110,0.8818,99.5682,133.9287
+208,Seoul 25 districts,raw model,2750,0.9069,128.4638,152.5335
+208,Seoul 25 districts,model + overlay,2750,0.9080,128.4638,152.5157
+208,Seoul all 28,raw model,3080,0.9039,125.5597,150.6966
+208,Seoul all 28,model + overlay,3080,0.9049,125.5597,150.6807
+208,All regions,raw model,20292,0.8092,118.0688,164.4855
+208,All regions,model + overlay,20292,0.8094,118.0688,164.4831

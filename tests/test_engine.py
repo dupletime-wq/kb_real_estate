@@ -144,3 +144,23 @@ def test_interval_score_rewards_covering_and_penalises_misses():
     assert np.isclose(s[0], 0.2)  # covered: just the width
     assert np.isclose(s[1], 0.1 + 20 * 0.1) and np.isclose(s[2], 0.2 + 20 * 0.4)  # missed: width + (2/alpha) * distance
 
+
+
+def test_engine_overlay_stops_at_the_cutoff_and_labels_use_observed_prices_only():
+    from kbforecast.engine import fit_engine
+    from kbforecast.overlay import RateSeries
+
+    kb = make_panel(extra_cities=60)
+    obs = {"sale": kb.sale.notna(), "jeonse": kb.jeonse.notna()}
+    obs["sale"].iloc[100:103, :] = False  # three weeks of filled prices in every series
+    kb = KBPanel(kb.sale, kb.jeonse, kb.sentiment, kb.hierarchy, kb.fingerprint, kb.warnings, obs)
+    frame = pd.DataFrame({"date": pd.to_datetime(["2008-01-01", "2012-01-02", "2014-06-02", "2020-01-01"]), "value": [3.0, 2.5, 3.0, 3.5]})
+    rate = RateSeries(frame, pd.Timestamp("2020-01-01"), "test")
+    fit = fit_engine(kb, anchors=(13, 78), first_origin="2013-01-07", refit_every=52, eval_step=4, rate=rate, overlay_max_horizon=52)
+    assert 13 in fit.overlay and 78 not in fit.overlay  # no overlay (and no overlay slope) beyond the cutoff
+    assert "overlay" in fit.predictions[13].columns and "overlay" not in fit.predictions[78].columns
+    assert fit.settings["overlay_max_horizon"] == 52 and fit.settings["observed_only_labels"] is True
+    filled_week = kb.sale.index[101]
+    realised = fit.predictions[13].dropna(subset=["y"])
+    origin_dates = realised.index.get_level_values("date")
+    assert not ((origin_dates == filled_week) | (origin_dates == filled_week - pd.Timedelta(weeks=13))).any()  # no label touches a filled price

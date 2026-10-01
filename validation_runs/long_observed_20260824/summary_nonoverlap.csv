@@ -1,0 +1,49 @@
+horizon,set,model,origins,MAE_mean,MAE_min,MAE_max
+52,Seoul city index,model,10.7308,3.9269,2.8423,4.7482
+52,Seoul 25 districts,model,10.7308,4.1020,3.1042,4.9028
+52,All regions,model,10.7308,3.8657,3.4669,4.2396
+52,Seoul city index,pooled_mean,10.7308,5.7914,5.1948,6.4785
+52,Seoul 25 districts,pooled_mean,10.7308,5.6730,5.2109,6.2317
+52,All regions,pooled_mean,10.7308,5.4712,5.1500,5.7725
+52,Seoul city index,province_shrunk,10.7308,6.4035,5.6460,7.1288
+52,Seoul 25 districts,province_shrunk,10.7308,6.2386,5.6377,6.8566
+52,All regions,province_shrunk,10.7308,5.8345,5.5177,6.1540
+52,Seoul city index,no_change,10.7308,7.2952,6.7148,7.9729
+52,Seoul 25 districts,no_change,10.7308,7.0381,6.5097,7.7789
+52,All regions,no_change,10.7308,5.2482,4.9110,5.5988
+78,Seoul city index,model,6.8462,6.2110,3.1399,9.1959
+78,Seoul 25 districts,model,6.8462,6.1432,4.0415,8.7097
+78,All regions,model,6.8462,6.2029,4.7344,7.9227
+78,Seoul city index,pooled_mean,6.8462,8.0046,6.9111,9.5520
+78,Seoul 25 districts,pooled_mean,6.8462,7.8939,6.8296,9.2267
+78,All regions,pooled_mean,6.8462,7.8298,6.5692,8.9246
+78,Seoul city index,province_shrunk,6.8462,9.2451,8.0987,10.6361
+78,Seoul 25 districts,province_shrunk,6.8462,9.0410,7.9925,10.2900
+78,All regions,province_shrunk,6.8462,8.5159,7.2298,9.5715
+78,Seoul city index,no_change,6.8462,10.5308,9.0755,12.0032
+78,Seoul 25 districts,no_change,6.8462,10.1550,9.2238,11.5597
+78,All regions,no_change,6.8462,7.5337,6.4362,8.0835
+104,Seoul city index,model,4.9231,7.9086,2.2194,11.6617
+104,Seoul 25 districts,model,4.9231,7.9645,2.9989,11.3209
+104,All regions,model,4.9231,8.6079,4.9397,10.7375
+104,Seoul city index,pooled_mean,4.9231,9.7394,5.2672,13.2556
+104,Seoul 25 districts,pooled_mean,4.9231,9.6854,5.7874,12.6189
+104,All regions,pooled_mean,4.9231,9.6210,6.4958,12.7160
+104,Seoul city index,province_shrunk,4.9231,11.5723,7.4114,14.6976
+104,Seoul 25 districts,province_shrunk,4.9231,11.4136,7.5337,14.0490
+104,All regions,province_shrunk,4.9231,10.6746,7.7553,13.6349
+104,Seoul city index,no_change,4.9231,13.1559,9.2953,16.4391
+104,Seoul 25 districts,no_change,4.9231,12.7601,9.6493,15.7260
+104,All regions,no_change,4.9231,9.3360,6.6661,11.9881
+208,Seoul city index,model,1.9904,12.4379,1.9568,30.3571
+208,Seoul 25 districts,model,1.9904,13.2257,3.1397,29.0220
+208,All regions,model,1.9904,13.3777,8.1412,21.1461
+208,Seoul city index,pooled_mean,1.9904,14.1288,8.6682,29.8201
+208,Seoul 25 districts,pooled_mean,1.9904,14.5802,8.9806,28.3753
+208,All regions,pooled_mean,1.9904,12.1784,8.8111,18.9929
+208,Seoul city index,province_shrunk,1.9904,18.7711,12.7773,34.5031
+208,Seoul 25 districts,province_shrunk,1.9904,19.0614,13.5146,33.0583
+208,All regions,province_shrunk,1.9904,14.9146,11.6220,19.8734
+208,Seoul city index,no_change,1.9904,22.5739,17.8145,39.1896
+208,Seoul 25 districts,no_change,1.9904,22.5351,17.3181,37.7448
+208,All regions,no_change,1.9904,14.5326,9.9484,26.2820
