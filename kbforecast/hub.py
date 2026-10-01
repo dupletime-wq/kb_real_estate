@@ -267,8 +267,13 @@ def extend_kb_panel(kb: KBPanel, hub: HubData) -> tuple[KBPanel, HubReport]:
     text = f"KB 데이터허브에서 {new_dates[0].date()} ~ {new_dates[-1].date()} {len(new_dates)}주 자료를 추가했습니다 (워크북 마지막 주 {last.date()})"
     if proxied:
         text += "; 허브에 없는 심리지표 범위(" + ", ".join(sorted(proxied)) + ")는 서울/전국 변화폭으로 추정"
+    observed = None
+    if kb.observed is not None:  # hub weeks are real observations wherever the hub has a value
+        observed = {
+            name: pd.concat([kb.observed[name], frame.iloc[-len(new_dates):].notna()]) for name, frame in (("sale", sale), ("jeonse", jeonse))
+        }
     extended = replace(
-        kb, sale=sale, jeonse=jeonse, sentiment=sentiment,
+        kb, sale=sale, jeonse=jeonse, sentiment=sentiment, observed=observed,
         fingerprint=f"{kb.fingerprint}+hub{new_dates[-1]:%Y%m%d}",
     )
     return extended, HubReport(True, text, tuple(new_dates), len(covered), len(active), ended)
