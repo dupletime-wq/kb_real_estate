@@ -13,7 +13,7 @@ Family C  (observation quality; needs `KBPanel.observed`)
 Family L  (long memory, for 52/104/208-week forecasts; only the sale index): r104 = 104-week log return, pdev156 / pdev260 = log price minus
     its trailing 156 / 260-week mean (at least 104 / 156 weeks of history).
 Family J  (valuation, needs the jeonse index): sj_level = log sale - log jeonse (minus log of the jeonse-to-sale ratio), sj_dev156 = its deviation from the
-    trailing 156-week mean, sj_z156 = that deviation in units of its trailing 156-week standard deviation. Same definitions as the unused columns of features.py.
+    trailing 156-week mean, sj_z156 = that deviation in units of its trailing 156-week standard deviation. Same definitions as the unused columns of features.py. sj_level_seoul = sj_level for the Seoul series only (others empty).
 Family V  (monthly trading volume from MOLIT, Seoul city / two halves / 25 districts only; see trades.py for the point-in-time design)
     vol_rel36     log((latest known month + 1) / (mean of the 36 months before it + 1))
     vol_chg3      log((last 3 known months + 1) / (the 3 months before them + 1))
@@ -29,7 +29,7 @@ import numpy as np
 import pandas as pd
 
 from .features import _sentiment_wide
-from .kb_panel import KBPanel
+from .kb_panel import KBPanel, seoul_region_keys
 from .trades import ASSUMED_LAG_WEEKS, LAG_SWITCH, seoul_weekly
 
 FAMILIES = {
@@ -37,7 +37,7 @@ FAMILIES = {
     "C": ("obs_age", "fill_ratio26"),
     "V": ("vol_rel36", "vol_chg3", "vol_px_inter"),
     "L": ("r104", "pdev156", "pdev260"),  # long memory of the price itself (long-horizon round)
-    "J": ("sj_level", "sj_dev156", "sj_z156"),  # price-to-jeonse valuation level and its deviation from the region's own past (long-horizon round)
+    "J": ("sj_level", "sj_dev156", "sj_z156", "sj_level_seoul"),  # price-to-jeonse valuation level and its deviation from the region's own past (long-horizon round)
 }
 ALL_CANDIDATE_FEATURES = tuple(n for names in FAMILIES.values() for n in names)
 
@@ -106,7 +106,11 @@ def valuation_features(kb: KBPanel) -> dict[str, pd.DataFrame]:
         return {}
     sj = L - LJ
     dev = sj - sj.rolling(156, min_periods=78).mean()
-    return {"sj_level": sj, "sj_dev156": dev, "sj_z156": dev / sj.rolling(156, min_periods=78).std().replace(0, np.nan)}
+    # sj_level_seoul: the same level for the Seoul series only (every other region stays empty, like the V family), so its coefficient is learned
+    # from Seoul rows alone. Post-hoc structure added after the J_level result was seen (README, long-horizon round).
+    sj_seoul = sj.copy()
+    sj_seoul.loc[:, ~sj.columns.isin(seoul_region_keys(kb.hierarchy))] = np.nan
+    return {"sj_level": sj, "sj_dev156": dev, "sj_z156": dev / sj.rolling(156, min_periods=78).std().replace(0, np.nan), "sj_level_seoul": sj_seoul}
 
 
 def monthly_net_counts(history: pd.DataFrame) -> pd.DataFrame:

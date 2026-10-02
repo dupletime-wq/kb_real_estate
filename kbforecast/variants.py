@@ -54,5 +54,7 @@ NAMED_VARIANTS: dict[str, EngineVariant] = {
     # post-hoc ablation of L_valuation (added after its result was seen; counted in the experiment log)
     "J_level": EngineVariant("J_level", ("sj_level",)),
     "J_dev": EngineVariant("J_dev", ("sj_dev156", "sj_z156")),
+    # post-hoc structure (added after J_level's result was seen): the valuation level enters for the Seoul series only
+    "J_level_seoul": EngineVariant("J_level_seoul", ("sj_level_seoul",)),
     "L_all": EngineVariant("L_all", ("r104", "pdev156", "pdev260", "sj_level", "sj_dev156", "sj_z156")),
 }

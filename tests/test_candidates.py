@@ -7,7 +7,7 @@ import pytest
 
 from kbforecast import candidates as C
 from kbforecast import models as M
-from kbforecast.kb_panel import KBPanel
+from kbforecast.kb_panel import KBPanel, seoul_region_keys
 from tests.synthetic import make_panel
 
 
@@ -345,6 +345,11 @@ def test_long_memory_and_valuation_features_are_causal_and_defined_as_documented
     assert full["pdev260"]["서울특별시"].iloc[:155].isna().all() and full["pdev260"]["서울특별시"].iloc[160:].notna().all()  # needs 156 weeks first
     got = C.build_candidate_features(kb, ("r104", "sj_z156"))
     assert list(got) == ["r104", "sj_z156"]
+    seoul = [c for c in kb.sale.columns if c in seoul_region_keys(kb.hierarchy)]
+    other = [c for c in kb.sale.columns if c not in seoul]
+    assert seoul and other
+    pd.testing.assert_frame_equal(full["sj_level_seoul"][seoul], full["sj_level"][seoul])  # same values for Seoul
+    assert full["sj_level_seoul"][other].isna().all().all() and full["sj_level"][other].notna().any().any()  # nothing elsewhere
 
 
 def test_time_validated_ridge_picks_alpha_per_group_and_never_validates_on_its_own_fit_rows():
