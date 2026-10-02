@@ -109,7 +109,7 @@
     "max_abs_diff_recomputed_vs_stored": 1.0016220490433048e-05
   },
   "this_run": {
-    "git_commit": "b6576ba3585b0298aab3a1f59946b8296c7b65be+dirty",
+    "git_commit": "3d42e3d823261232c3b70e804bc0c94171a6828b+dirty",
     "python": "3.11.15",
     "numpy": "2.4.6",
     "pandas": "3.0.6",
@@ -123,6 +123,12 @@
     "refit_every_weeks": 26,
     "engine_default_refit_every_weeks": 39,
     "origin_spacing_weeks": 2,
-    "hgb_early_stopping": "scikit-learn default 'auto' (on when > 10,000 training rows; random 10% validation split, not time ordered)"
+    "hgb_early_stopping": "scikit-learn default 'auto': on when more than 10,000 rows are fitted (production halves the rows with row_stride=2 first, so it needs > 20,000 training rows); random 10% hold-out, not time ordered",
+    "label_defaults": {
+      "engine fit_engine": "observed-only labels (observed_only=True)",
+      "scripts/validate_long.py": "observed-only",
+      "scripts/validate.py": "observed-only since this change (was: filled values unless --observed-only)",
+      "frozen artifacts": "observed-only"
+    }
   }
 }

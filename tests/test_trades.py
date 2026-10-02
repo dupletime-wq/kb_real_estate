@@ -106,3 +106,20 @@ def test_volume_features_use_only_weeks_old_enough_to_be_reported():
     changed2 = weekly.copy()
     changed2.iloc[t - ASSUMED_LAG_WEEKS["before_2020"]] *= 5.0  # the newest week that counts as known
     assert not volume_features(changed2)["tv_ratio"].iloc[t].equals(base["tv_ratio"].iloc[t])
+
+
+def test_verify_history_flags_mapping_and_coverage_problems():
+    from kbforecast.trades import verify_history
+
+    rows = []
+    for m in pd.period_range("2020-01", "2020-04", freq="M"):
+        for name, code in SEOUL_GU_CODES.items():
+            if code == "11110" and str(m) == "2020-03":
+                continue  # one district-month without any deal while the others traded
+            rows.append({"sgg_cd": code, "deal_date": f"{m}-15", "n_all": 3, "n_cancelled": 0})
+    ok = verify_history(pd.DataFrame(rows), "2020-01")
+    assert ok["codes_missing"] == [] and ok["codes_unexpected"] == [] and ok["duplicate_code_day_rows"] == 0
+    assert ok["district_months_without_deals"] == [("11110", "2020-03")]
+    bad = pd.DataFrame(rows + [{"sgg_cd": "99999", "deal_date": "2020-01-15", "n_all": 1, "n_cancelled": 2}, rows[0]])
+    r = verify_history(bad, "2020-01")
+    assert r["codes_unexpected"] == ["99999"] and r["duplicate_code_day_rows"] == 1 and r["negative_or_cancelled_gt_all"] == 1

@@ -225,3 +225,30 @@ def as_known_at(history: pd.DataFrame, as_of: pd.Timestamp, lag_weeks: dict[str,
     cutoff = as_of - pd.Timedelta(weeks=weeks)
     days = pd.to_datetime(history["deal_date"])
     return history.loc[days <= cutoff]
+
+
+def verify_history(history: pd.DataFrame, first_month: str = "2006-01") -> dict:
+    """Mapping and coverage checks on the daily history: the 25 Seoul district codes, no other codes, no duplicate (code, day) rows,
+    and for every code and contract month some deals (a district-month with none while the rest of Seoul traded is reported)."""
+    issues: dict = {}
+    codes = set(SEOUL_GU_CODES.values())
+    seen = set(history["sgg_cd"].unique())
+    issues["codes_missing"] = sorted(codes - seen)
+    issues["codes_unexpected"] = sorted(seen - codes)
+    issues["duplicate_code_day_rows"] = int(history.duplicated(["sgg_cd", "deal_date"]).sum())
+    months = pd.PeriodIndex(pd.to_datetime(history["deal_date"]), freq="M")
+    grid = history.groupby([history["sgg_cd"], months])["n_all"].sum().unstack(0).reindex(pd.period_range(first_month, months.max(), freq="M"))
+    issues["months_covered"] = f"{grid.index.min()}..{grid.index.max()}"
+    empty = grid.isna() | (grid == 0)
+    seoul_total = grid.fillna(0).sum(axis=1)
+    issues["district_months_without_deals"] = [(c, str(m)) for m in grid.index for c in grid.columns if empty.at[m, c] and seoul_total[m] > 0]
+    issues["negative_or_cancelled_gt_all"] = int(((history["n_cancelled"] > history["n_all"]) | (history["n_all"] < 0)).sum())
+    return issues
+
+
+def verify_mapping_against_kb(kb) -> dict:
+    """The 25 district names used for the MOLIT codes must be Seoul district series of the KB panel (and nothing else of the same name)."""
+    h = kb.hierarchy
+    seoul_gu = set(h.index[(h["province"] == "서울특별시") & (h["level"] == "gu")])
+    names = set(SEOUL_GU_CODES)
+    return {"names_not_in_kb_seoul_gu": sorted(names - seoul_gu), "kb_seoul_gu_without_molit_code": sorted(seoul_gu - names)}

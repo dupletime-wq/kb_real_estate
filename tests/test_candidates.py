@@ -194,3 +194,20 @@ def test_engine_variant_changes_columns_settings_and_correction_but_default_is_u
     assert "bias_corr" in fit.predictions[13].columns and "bias_corr" not in default.predictions[13].columns
     with pytest.raises(ValueError):
         fit_engine(kb, variant=EngineVariant("v", extra_features=("vol_rel36",)), **kw)  # volume features without history are refused, not invented
+
+
+def test_train_start_masks_labels_of_earlier_origins_and_the_runner_accepts_it(tmp_path):
+    from kbforecast import evalsuite as E
+    from kbforecast.experiments import RunConfig, mask_targets, run_feature_experiments
+    from kbforecast.features import make_targets
+    from kbforecast.variants import NAMED_VARIANTS
+
+    kb = make_panel(weeks=420, extra_cities=60)
+    y = make_targets(np.log(kb.sale), 13)
+    start = pd.Timestamp("2011-06-06")
+    masked = mask_targets(y, start)
+    dates = masked.index.get_level_values("date")
+    assert masked[dates < start].isna().all() and masked[dates >= start].equals(y[dates >= start]) and mask_targets(y, None) is y
+    cfg = RunConfig(first_origin="2013-06-03", refit_every=104, eval_step=4, min_train_rows=3000, n_boot=50, primary=(13,), extra=())
+    out = run_feature_experiments(kb, cfg, [NAMED_VARIANTS["D_hgb_fixed"]], tmp_path / "r", E.ExperimentLog(tmp_path / "log.jsonl"), None, with_ridge_check=False, combine=False, train_start=start)
+    assert "D_hgb_fixed" in out["verdicts"]

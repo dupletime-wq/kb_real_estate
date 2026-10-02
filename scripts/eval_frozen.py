@@ -48,7 +48,8 @@ def main() -> None:
     meta["settings_of_the_frozen_baseline"] = {
         "model": "pooled Ridge (alpha per horizon) + HistGradientBoosting; Ridge alone from 78 weeks", "labels": "observed prices only", "rate_overlay": "Seoul only, anchors <= 52 weeks, base rate + CD91 (1-day lag)",
         "refit_every_weeks": 26, "engine_default_refit_every_weeks": 39, "origin_spacing_weeks": 2,
-        "hgb_early_stopping": "scikit-learn default 'auto' (on when > 10,000 training rows; random 10% validation split, not time ordered)",
+        "hgb_early_stopping": "scikit-learn default 'auto': on when more than 10,000 rows are fitted (production halves the rows with row_stride=2 first, so it needs > 20,000 training rows); random 10% hold-out, not time ordered",
+        "label_defaults": {"engine fit_engine": "observed-only labels (observed_only=True)", "scripts/validate_long.py": "observed-only", "scripts/validate.py": "observed-only since this change (was: filled values unless --observed-only)", "frozen artifacts": "observed-only"},
     }
     (out / "baseline_metadata.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
 

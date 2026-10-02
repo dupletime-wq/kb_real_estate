@@ -86,6 +86,26 @@ def main() -> None:
     meta = {"workbook_sha256": kb.fingerprint, "last_date": str(kb.last_date.date()), "feature_columns": cols, "labels": "observed-only" if observed is not None else "filled values allowed (no observed mask)", "refit_every": cfg.refit_every, "families": fams}
     (out / "run_metadata.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
 
+    # 1b. where the baseline errors concentrate, by what was known at the origin: trailing price trend and buyer-index change (causal terciles)
+    state_rows = []
+    for h, f in base_frames.items():
+        regs = f.index.get_level_values("region").unique()
+        sets = E.region_sets(regs)
+        for qname, col, labels in (("price trend r26", "r26", ("lowest third", "middle third", "highest third")), ("buyer index 13w change", "buyer_d13", ("falling most", "middle", "rising most"))):
+            if col not in fs.X.columns:
+                continue
+            st = E.origin_state(fs.X[col])
+            for gname in ("서울 28", "서울 외"):
+                if sets.get(gname):
+                    t = E.decompose_by_state(f, "pred", st, labels, h, sets[gname])
+                    t.insert(1, "state_variable", qname)
+                    t.insert(2, "group", gname)
+                    state_rows.append(t)
+    if state_rows:
+        state_tbl = pd.concat(state_rows, ignore_index=True)
+        state_tbl.to_csv(out / "decomposition_by_origin_state.csv", index=False, float_format="%.4f")
+        print("\n== baseline error by state known at the origin\n" + state_tbl.round(2).to_string(index=False))
+
     # 2. candidate A on the fresh baseline (all regions at every horizon, so the 'global' scope is testable at 13/26 weeks too)
     table, verdicts = candidate_A_report(base_frames, dates, out, log, cfg.n_boot)
     table.to_csv(out / "candidate_A_summary.csv", index=False, float_format="%.4f")
@@ -96,12 +116,28 @@ def main() -> None:
 
     # 3. feature / model families
     variants = [v for name, v in NAMED_VARIANTS.items() if name != "current" and name[0] in fams]
-    if variants:
-        result = run_feature_experiments(kb, cfg, variants, out, log, history)
-        print("\n== family verdicts (pre-set rule; 13/26/52 weeks decide, 78/104 reported)")
+    groups = [("B_C_D", [v for v in variants if not v.name.startswith("V_")], None, out)]
+    vol = [v for v in variants if v.name.startswith("V_")]
+    if vol:
+        from kbforecast.candidates import build_candidate_features
+        from kbforecast.trades import verify_history
+
+        print("\n== trade history checks:", json.dumps({k: (v if not isinstance(v, list) or len(v) < 8 else f"{len(v)} items") for k, v in verify_history(history).items()}, ensure_ascii=False))
+        from kbforecast.trades import verify_mapping_against_kb
+
+        print("== district names vs KB panel:", verify_mapping_against_kb(kb))
+        vf = build_candidate_features(kb, ("vol_chg3",), history)["vol_chg3"]["서울특별시"]
+        common_start = vf.first_valid_index()
+        print(f"== volume features exist from {common_start.date()}; baseline AND candidates are trained on labels from that date only (common-period comparison)")
+        groups.append(("V", vol, common_start, out / "volume_common_period"))
+    for label, group, train_start, gout in groups:
+        if not group:
+            continue
+        result = run_feature_experiments(kb, cfg, group, gout, log, history, train_start=train_start)
+        print(f"\n== family verdicts [{label}] (pre-set rule; 13/26/52 weeks decide, 78/104 reported)")
         for name, v in result["verdicts"].items():
             print(f"{name:40s} {v['verdict']}  score={v['score']:+.2f}%  extra-horizon rel%={v.get('extra_horizons', {})}  {'; '.join(v['reasons'][:2])}")
-        print(f"\npassed alone: {result['passed']}; combination: {result['combo']}; candidates recorded so far: {result['n_candidates']}")
+        print(f"passed alone: {result['passed']}; combination: {result['combo']}; candidates recorded so far: {result['n_candidates']}")
         hold = [n for n, v in result["verdicts"].items() if v["verdict"] == "보류"]
         print(f"hold (log forward, keep the current model): {hold}")
     print(f"\nsaved to {out}")

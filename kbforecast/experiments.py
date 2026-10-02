@@ -123,6 +123,11 @@ class RunConfig:
         return WFConfig(horizon=h, first_origin=self.first_origin, eval_step=self.eval_step, refit_every=self.refit_every, min_train_rows=self.min_train_rows)
 
 
+def mask_targets(y: pd.Series, start: pd.Timestamp | None) -> pd.Series:
+    """Drop the labels of origins before `start` (NaN): neither training nor scoring can use them. None leaves y untouched."""
+    return y if start is None else y.where(y.index.get_level_values("date") >= pd.Timestamp(start))
+
+
 def variant_frame(
     kb: KBPanel, fs: FeatureSet, cols: list[str], variant: EngineVariant, h: int, y: pd.Series, cfg: RunConfig, z_rate: pd.Series | None, seoul: set[str],
     volume_history: pd.DataFrame | None = None, ridge_only: bool = False, hgb_record: list | None = None,
@@ -157,9 +162,13 @@ def _common_rows(frames: dict[str, pd.DataFrame]) -> pd.DataFrame:
 
 def run_feature_experiments(
     kb: KBPanel, cfg: RunConfig, variants: list[EngineVariant], out: Path, log: E.ExperimentLog, volume_history: pd.DataFrame | None = None,
-    rate=None, cd=None, with_ridge_check: bool = True, combine: bool = True,
+    rate=None, cd=None, with_ridge_check: bool = True, combine: bool = True, train_start: pd.Timestamp | None = None,
 ) -> dict:
-    """Baseline vs each variant at the primary horizons (decision) and at the extra horizons (reported separately)."""
+    """Baseline vs each variant at the primary horizons (decision) and at the extra horizons (reported separately).
+
+    `train_start` removes the labels of earlier origins for baseline AND candidates alike (e.g. the first date a new data source
+    exists), so a short new series cannot make the candidate look better only because the baseline had more or other history.
+    """
     out.mkdir(parents=True, exist_ok=True)
     fs = build_features(kb)
     cols = model_columns(fs)
@@ -168,12 +177,16 @@ def run_feature_experiments(
     z_rate = rate_signal_weekly(rate or load_base_rate(None), cd or load_cd91(None), dates)
     observed = kb.observed["sale"] if kb.observed is not None else None
     groups_all = {k: v for k, v in E.region_sets(fs.log_price.columns).items() if v}
+
+    def targets(h: int) -> pd.Series:
+        return mask_targets(make_targets(fs.log_price, h, observed), train_start)
+
     results: dict[str, dict[int, dict]] = {}
     saved: list[pd.DataFrame] = []
     horizons = list(cfg.primary) + list(cfg.extra)
     hgb_log: dict[str, list] = {}
     for h in horizons:
-        y = make_targets(fs.log_price, h, observed)
+        y = targets(h)
         frames = {"baseline": variant_frame(kb, fs, cols, CURRENT, h, y, cfg, z_rate, seoul, volume_history)}
         for v in variants:
             rec: list = []
@@ -225,7 +238,7 @@ def run_feature_experiments(
         combo = EngineVariant("combo_" + "+".join(passed), feats, hgb)
         per_h = {}
         for h in horizons:
-            y = make_targets(fs.log_price, h, observed)
+            y = targets(h)
             wide = _common_rows({"baseline": variant_frame(kb, fs, cols, CURRENT, h, y, cfg, z_rate, seoul, volume_history), combo.name: variant_frame(kb, fs, cols, combo, h, y, cfg, z_rate, seoul, volume_history)})
             per_h[h] = E.compare(wide.rename(columns={"baseline": "base"}), "base", combo.name, h, groups_all, cfg.n_boot)
             log.record(combo.name, "combo", {"horizon": h, **combo.as_dict()}, [h], {"rel_MAE_seoul28_pct": per_h[h]["groups"]["서울 28"]["rel_MAE_pct"]})
