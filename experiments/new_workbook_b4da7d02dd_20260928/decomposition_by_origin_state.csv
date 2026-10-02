@@ -1,0 +1,61 @@
+horizon,state_variable,group,state,n,MAE_log_pp,MAE_simple_pp,RMSE_log_pp,bias_pred_minus_actual_pp,median_residual_actual_minus_pred_pp
+13,price trend r26,서울 28,lowest third,1148,0.9151,0.8991,1.2141,-0.1897,0.2419
+13,price trend r26,서울 28,middle third,2534,0.5436,0.5490,0.7931,-0.0175,-0.0669
+13,price trend r26,서울 28,highest third,4746,1.0624,1.0942,1.5265,-0.1447,-0.1158
+13,price trend r26,서울 외,lowest third,17968,0.6115,0.6014,1.0253,0.2020,-0.1008
+13,price trend r26,서울 외,middle third,15328,0.4477,0.4503,0.7210,0.0648,-0.1156
+13,price trend r26,서울 외,highest third,13335,1.0386,1.0764,1.6383,-0.2385,-0.1163
+13,buyer index 13w change,서울 28,falling most,3319,0.9330,0.9492,1.4091,-0.1241,-0.1372
+13,buyer index 13w change,서울 28,middle,1236,0.7957,0.8000,1.1592,-0.2147,0.0725
+13,buyer index 13w change,서울 28,rising most,3873,0.8754,0.8978,1.2544,-0.0701,-0.0194
+13,buyer index 13w change,서울 외,falling most,14733,0.6992,0.7032,1.1920,0.1610,-0.1368
+13,buyer index 13w change,서울 외,middle,17184,0.5977,0.5995,1.0260,0.0578,-0.0939
+13,buyer index 13w change,서울 외,rising most,14570,0.7577,0.7765,1.2692,-0.1324,-0.1035
+26,price trend r26,서울 28,lowest third,1115,1.8003,1.7594,2.3954,-0.1128,0.1528
+26,price trend r26,서울 28,middle third,2524,1.4363,1.4535,1.9118,0.1683,-0.1070
+26,price trend r26,서울 28,highest third,4593,2.2634,2.3793,2.9907,-0.6195,0.2335
+26,price trend r26,서울 외,lowest third,17483,1.3081,1.2759,2.1617,0.5977,-0.3730
+26,price trend r26,서울 외,middle third,14939,1.2063,1.2190,1.9031,0.2136,-0.3003
+26,price trend r26,서울 외,highest third,13092,2.4175,2.5644,3.5172,-0.5097,-0.3643
+26,buyer index 13w change,서울 28,falling most,3306,2.2780,2.3431,3.0598,-0.7543,0.4309
+26,buyer index 13w change,서울 28,middle,1202,1.6927,1.7196,2.1982,-0.3099,0.2624
+26,buyer index 13w change,서울 28,rising most,3724,1.7354,1.8113,2.3142,0.0859,-0.2064
+26,buyer index 13w change,서울 외,falling most,14847,1.7208,1.7347,2.7860,0.4706,-0.3762
+26,buyer index 13w change,서울 외,middle,16413,1.3554,1.3687,2.1657,0.2379,-0.3458
+26,buyer index 13w change,서울 외,rising most,14112,1.7363,1.8153,2.7167,-0.2756,-0.2997
+52,price trend r26,서울 28,lowest third,1126,3.2246,3.1545,4.2469,-1.4161,1.2580
+52,price trend r26,서울 28,middle third,2530,3.4956,3.6043,4.5046,-0.2120,0.5588
+52,price trend r26,서울 28,highest third,4240,4.3611,4.7414,5.4225,-1.8121,1.7600
+52,price trend r26,서울 외,lowest third,16828,2.6701,2.6267,3.8557,0.8283,-0.9930
+52,price trend r26,서울 외,middle third,14194,3.2428,3.3396,4.8997,0.4089,-0.7878
+52,price trend r26,서울 외,highest third,12570,5.9983,6.5032,7.8449,-0.1566,-1.4027
+52,buyer index 13w change,서울 28,falling most,3179,4.3447,4.5825,5.5559,-2.3513,2.2851
+52,buyer index 13w change,서울 28,middle,1181,4.0598,4.1349,5.0311,-0.7735,1.4667
+52,buyer index 13w change,서울 28,rising most,3536,3.4953,3.7679,4.3947,-0.4032,0.0905
+52,buyer index 13w change,서울 외,falling most,14508,4.1178,4.1888,5.9717,1.2601,-1.0737
+52,buyer index 13w change,서울 외,middle,15416,3.0981,3.1682,4.6234,0.6540,-1.0082
+52,buyer index 13w change,서울 외,rising most,13526,4.2954,4.6491,6.1049,-0.7669,-0.8718
+78,price trend r26,서울 28,lowest third,1118,4.7656,4.8535,6.3503,-1.1816,0.0250
+78,price trend r26,서울 28,middle third,2374,5.6397,6.0587,7.4200,-1.9012,1.1953
+78,price trend r26,서울 28,highest third,4068,6.8300,7.5056,8.3634,-2.5410,3.3451
+78,price trend r26,서울 외,lowest third,15537,5.0908,5.1195,6.7021,0.9715,-2.3486
+78,price trend r26,서울 외,middle third,13611,5.0780,5.3791,7.3261,0.2320,-1.4726
+78,price trend r26,서울 외,highest third,12524,8.6852,9.4451,11.1514,1.3447,-2.8894
+78,buyer index 13w change,서울 28,falling most,3235,6.7794,7.2556,8.4948,-3.0287,3.4667
+78,buyer index 13w change,서울 28,middle,1142,5.7319,5.9508,7.3536,-0.4243,0.6026
+78,buyer index 13w change,서울 28,rising most,3183,5.6624,6.3068,7.2027,-1.8501,0.8299
+78,buyer index 13w change,서울 외,falling most,14928,6.3269,6.4912,8.7724,2.2791,-2.3996
+78,buyer index 13w change,서울 외,middle,13925,5.1820,5.3457,6.9670,1.2134,-2.3374
+78,buyer index 13w change,서울 외,rising most,12677,7.0393,7.7575,9.4390,-1.1915,-1.4205
+104,price trend r26,서울 28,lowest third,1126,6.3513,6.7535,8.6735,-2.0910,0.8351
+104,price trend r26,서울 28,middle third,2290,7.5597,8.3700,10.1083,-2.7809,1.7003
+104,price trend r26,서울 28,highest third,3808,8.6261,9.5478,10.5055,-2.6581,3.3730
+104,price trend r26,서울 외,lowest third,14527,8.3127,8.5903,10.5895,1.2587,-4.0249
+104,price trend r26,서울 외,middle third,12885,7.2276,7.8105,9.9945,0.4622,-2.2370
+104,price trend r26,서울 외,highest third,12357,10.7496,11.6392,13.1505,4.1032,-5.6715
+104,buyer index 13w change,서울 28,falling most,2925,9.1983,9.9920,11.1526,-4.2801,4.6611
+104,buyer index 13w change,서울 28,middle,1100,7.1372,7.5202,9.4849,0.0132,0.1607
+104,buyer index 13w change,서울 28,rising most,3199,7.0508,8.0122,9.2918,-1.9819,0.9584
+104,buyer index 13w change,서울 외,falling most,14081,8.6500,8.9084,11.1366,3.6625,-4.2611
+104,buyer index 13w change,서울 외,middle,12684,7.9010,8.2266,9.9407,2.2185,-4.0668
+104,buyer index 13w change,서울 외,rising most,12862,9.5722,10.6924,12.4862,-0.2860,-2.8586

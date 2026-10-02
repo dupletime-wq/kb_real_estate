@@ -1,0 +1,16 @@
+{
+  "kind": "snapshot",
+  "fetched_at_utc": "2026-10-01T09:27:17+00:00",
+  "contract_months": [
+    "202607",
+    "202610"
+  ],
+  "n_months": 4,
+  "rows": 1893,
+  "districts": 25,
+  "deals": 11644,
+  "endpoint": "RTMSDataSvcAptTrade",
+  "git_commit": "0bea0420be9737690a82b02138219567a8a79e08",
+  "failed_district_months": [],
+  "note": "snapshot = point-in-time (what the API showed on this date)"
+}

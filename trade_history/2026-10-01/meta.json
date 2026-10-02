@@ -1,0 +1,16 @@
+{
+  "kind": "history",
+  "fetched_at_utc": "2026-10-01T09:55:14+00:00",
+  "contract_months": [
+    "200601",
+    "202609"
+  ],
+  "n_months": 249,
+  "rows": 170419,
+  "districts": 25,
+  "deals": 1441380,
+  "endpoint": "RTMSDataSvcAptTrade",
+  "git_commit": "435e107b575ba06e0f6d6f30d8b8530c589522b8",
+  "failed_district_months": [],
+  "note": "history = final/revised data fetched on this date; NOT what was known at the time"
+}

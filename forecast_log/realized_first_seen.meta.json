@@ -1,0 +1,8 @@
+{
+  "archive_created_utc": "2026-10-02T05:04:02+00:00",
+  "meaning": "first_seen = first value this system saw; NOT necessarily the first published value",
+  "late_collection_days": 14,
+  "first_batch_rows": 394,
+  "first_batch_late_rows": 0,
+  "note": "rows of the first batch are mostly late (back-filled); use first_published only for vintages verified via verify_vintage"
+}

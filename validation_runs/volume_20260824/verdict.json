@@ -1,0 +1,8 @@
+{
+  "rule_passed_per_spec": {
+    "primary (net, assumed lag)": false,
+    "lag + 4 weeks": false,
+    "gross counts": false
+  },
+  "adopt": false
+}

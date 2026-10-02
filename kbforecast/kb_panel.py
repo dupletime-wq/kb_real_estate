@@ -58,6 +58,19 @@ class KBPanel:
         return KBPanel(self.jeonse, self.sale, self.sentiment, self.hierarchy, self.fingerprint, self.warnings, swapped)
 
 
+def truncate_panel(kb: KBPanel, last: str | pd.Timestamp) -> KBPanel:
+    """The panel as it was at `last` (later weeks removed everywhere, including the observation mask). The fingerprint records the cut so a
+    truncated panel can never be mistaken for the original file."""
+    from dataclasses import replace
+
+    last = pd.Timestamp(last)
+    obs = None if kb.observed is None else {k: v.loc[:last] for k, v in kb.observed.items()}
+    return replace(
+        kb, sale=kb.sale.loc[:last], jeonse=kb.jeonse.loc[:last], sentiment={k: v.loc[:last] for k, v in kb.sentiment.items()}, observed=obs,
+        fingerprint=f"{kb.fingerprint}[truncated:{last:%Y%m%d}]",
+    )
+
+
 def seoul_region_keys(hierarchy: pd.DataFrame) -> set[str]:
     """Seoul city, its two half-city groups and its 25 districts (the series the policy-rate overlay applies to)."""
     h = hierarchy
