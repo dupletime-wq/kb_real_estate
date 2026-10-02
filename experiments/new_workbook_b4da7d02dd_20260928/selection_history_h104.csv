@@ -1,0 +1,4 @@
+horizon,window,selection_rows,chosen,skipped_candidates,MAE_sel_none,MAE_sel_global_x0.5,MAE_sel_global_x1.0,MAE_sel_seoul_x0.5,MAE_sel_seoul_x1.0,MAE_sel_seoul_recent156_x0.5
+104,2020-01-06..2021-12-31,2744,none,,4.6995,5.0836,5.5174,4.7381,4.7798,4.7381
+104,2022-01-01..2023-12-31,4032,none,,7.1869,7.9294,8.7220,7.1811,7.1792,7.1467
+104,2024-01-01..2035-12-31,5348,none,,7.9488,8.5800,9.2665,8.0274,8.1233,8.1906

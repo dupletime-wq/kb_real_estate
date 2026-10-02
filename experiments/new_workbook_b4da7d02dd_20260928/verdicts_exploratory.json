@@ -1,0 +1,283 @@
+{
+  "B_px_sent": {
+    "verdict": "보류",
+    "score": -0.27009053256629906,
+    "score_horizons": [
+      13,
+      26,
+      52
+    ],
+    "evidence": "탐색적: 같은 과거 자료로 이미 여러 번 탐색된 비교이며 다중검정 미보정 구간으로 내린 판정입니다. 운영 기본값은 자동으로 바뀌지 않습니다 (최종 확인은 전향 기록).",
+    "reasons": [
+      "score -0.27% is above -1.0%",
+      "bootstrap 90% interval excludes zero at only 1 of 3 horizons"
+    ],
+    "extra_horizons": {
+      "78": 0.08015964153580413,
+      "104": 0.014984551072516616
+    }
+  },
+  "B_divergence": {
+    "verdict": "보류",
+    "score": -0.08764740289118889,
+    "score_horizons": [
+      13,
+      26,
+      52
+    ],
+    "evidence": "탐색적: 같은 과거 자료로 이미 여러 번 탐색된 비교이며 다중검정 미보정 구간으로 내린 판정입니다. 운영 기본값은 자동으로 바뀌지 않습니다 (최종 확인은 전향 기록).",
+    "reasons": [
+      "score -0.09% is above -1.0%",
+      "bootstrap 90% interval excludes zero at only 1 of 3 horizons"
+    ],
+    "extra_horizons": {
+      "78": 0.038167487534623845,
+      "104": 0.03152908380676944
+    }
+  },
+  "B_buyer_run": {
+    "verdict": "보류",
+    "score": -0.2732049845274494,
+    "score_horizons": [
+      13,
+      26,
+      52
+    ],
+    "evidence": "탐색적: 같은 과거 자료로 이미 여러 번 탐색된 비교이며 다중검정 미보정 구간으로 내린 판정입니다. 운영 기본값은 자동으로 바뀌지 않습니다 (최종 확인은 전향 기록).",
+    "reasons": [
+      "score -0.27% is above -1.0%"
+    ],
+    "extra_horizons": {
+      "78": -0.07387581218204486,
+      "104": -0.11051201533237576
+    }
+  },
+  "B_all": {
+    "verdict": "보류",
+    "score": -0.3806517685113568,
+    "score_horizons": [
+      13,
+      26,
+      52
+    ],
+    "evidence": "탐색적: 같은 과거 자료로 이미 여러 번 탐색된 비교이며 다중검정 미보정 구간으로 내린 판정입니다. 운영 기본값은 자동으로 바뀌지 않습니다 (최종 확인은 전향 기록).",
+    "reasons": [
+      "score -0.38% is above -1.0%"
+    ],
+    "extra_horizons": {
+      "78": 0.027019922886628578,
+      "104": -0.07383556681677117
+    }
+  },
+  "C_obs_age": {
+    "verdict": "기각",
+    "score": 0.0,
+    "score_horizons": [
+      13,
+      26,
+      52
+    ],
+    "evidence": "탐색적: 같은 과거 자료로 이미 여러 번 탐색된 비교이며 다중검정 미보정 구간으로 내린 판정입니다. 운영 기본값은 자동으로 바뀌지 않습니다 (최종 확인은 전향 기록).",
+    "reasons": [
+      "Seoul-28 mean relative MAE change is not negative"
+    ],
+    "extra_horizons": {
+      "78": 2.220446049250313e-14,
+      "104": -2.220446049250313e-14
+    }
+  },
+  "C_fill_ratio": {
+    "verdict": "기각",
+    "score": 0.023618000800225875,
+    "score_horizons": [
+      13,
+      26,
+      52
+    ],
+    "evidence": "탐색적: 같은 과거 자료로 이미 여러 번 탐색된 비교이며 다중검정 미보정 구간으로 내린 판정입니다. 운영 기본값은 자동으로 바뀌지 않습니다 (최종 확인은 전향 기록).",
+    "reasons": [
+      "Seoul-28 mean relative MAE change is not negative"
+    ],
+    "extra_horizons": {
+      "78": 1.2612585515287433,
+      "104": 1.7320654998697504
+    }
+  },
+  "C_both": {
+    "verdict": "기각",
+    "score": 0.023618000800225875,
+    "score_horizons": [
+      13,
+      26,
+      52
+    ],
+    "evidence": "탐색적: 같은 과거 자료로 이미 여러 번 탐색된 비교이며 다중검정 미보정 구간으로 내린 판정입니다. 운영 기본값은 자동으로 바뀌지 않습니다 (최종 확인은 전향 기록).",
+    "reasons": [
+      "Seoul-28 mean relative MAE change is not negative"
+    ],
+    "extra_horizons": {
+      "78": 1.2612585515287433,
+      "104": 1.7320654998697504
+    }
+  },
+  "D_hgb_fixed": {
+    "verdict": "보류",
+    "score": -0.04011088206290111,
+    "score_horizons": [
+      13,
+      26,
+      52
+    ],
+    "evidence": "탐색적: 같은 과거 자료로 이미 여러 번 탐색된 비교이며 다중검정 미보정 구간으로 내린 판정입니다. 운영 기본값은 자동으로 바뀌지 않습니다 (최종 확인은 전향 기록).",
+    "reasons": [
+      "score -0.04% is above -1.0%",
+      "bootstrap 90% interval excludes zero at only 0 of 3 horizons"
+    ],
+    "extra_horizons": {
+      "78": 0.0,
+      "104": 0.0
+    }
+  },
+  "D_hgb_timeval": {
+    "verdict": "보류",
+    "score": -2.3747304133301097,
+    "score_horizons": [
+      13,
+      26,
+      52
+    ],
+    "evidence": "탐색적: 같은 과거 자료로 이미 여러 번 탐색된 비교이며 다중검정 미보정 구간으로 내린 판정입니다. 운영 기본값은 자동으로 바뀌지 않습니다 (최종 확인은 전향 기록).",
+    "reasons": [
+      "bootstrap 90% interval excludes zero at only 1 of 3 horizons"
+    ],
+    "extra_horizons": {
+      "78": 0.0,
+      "104": 0.0
+    }
+  },
+  "B_px_sent [Ridge only]": {
+    "verdict": "기각",
+    "score": 0.027512272482551243,
+    "score_horizons": [
+      13,
+      26,
+      52
+    ],
+    "evidence": "탐색적: 같은 과거 자료로 이미 여러 번 탐색된 비교이며 다중검정 미보정 구간으로 내린 판정입니다. 운영 기본값은 자동으로 바뀌지 않습니다 (최종 확인은 전향 기록).",
+    "reasons": [
+      "Seoul-28 mean relative MAE change is not negative"
+    ],
+    "extra_horizons": {
+      "78": 0.08015964153580413,
+      "104": 0.014984551072516616
+    }
+  },
+  "B_divergence [Ridge only]": {
+    "verdict": "기각",
+    "score": 0.07924052078030301,
+    "score_horizons": [
+      13,
+      26,
+      52
+    ],
+    "evidence": "탐색적: 같은 과거 자료로 이미 여러 번 탐색된 비교이며 다중검정 미보정 구간으로 내린 판정입니다. 운영 기본값은 자동으로 바뀌지 않습니다 (최종 확인은 전향 기록).",
+    "reasons": [
+      "Seoul-28 mean relative MAE change is not negative"
+    ],
+    "extra_horizons": {
+      "78": 0.038167487534623845,
+      "104": 0.03152908380676944
+    }
+  },
+  "B_buyer_run [Ridge only]": {
+    "verdict": "보류",
+    "score": -0.4494816428804745,
+    "score_horizons": [
+      13,
+      26,
+      52
+    ],
+    "evidence": "탐색적: 같은 과거 자료로 이미 여러 번 탐색된 비교이며 다중검정 미보정 구간으로 내린 판정입니다. 운영 기본값은 자동으로 바뀌지 않습니다 (최종 확인은 전향 기록).",
+    "reasons": [
+      "score -0.45% is above -1.0%",
+      "bootstrap 90% interval excludes zero at only 1 of 3 horizons"
+    ],
+    "extra_horizons": {
+      "78": -0.07387581218204486,
+      "104": -0.11051201533237576
+    }
+  },
+  "B_all [Ridge only]": {
+    "verdict": "보류",
+    "score": -0.3393344488845022,
+    "score_horizons": [
+      13,
+      26,
+      52
+    ],
+    "evidence": "탐색적: 같은 과거 자료로 이미 여러 번 탐색된 비교이며 다중검정 미보정 구간으로 내린 판정입니다. 운영 기본값은 자동으로 바뀌지 않습니다 (최종 확인은 전향 기록).",
+    "reasons": [
+      "score -0.34% is above -1.0%",
+      "bootstrap 90% interval excludes zero at only 1 of 3 horizons"
+    ],
+    "extra_horizons": {
+      "78": 0.027019922886628578,
+      "104": -0.07383556681677117
+    }
+  },
+  "C_obs_age [Ridge only]": {
+    "verdict": "기각",
+    "score": 0.0,
+    "score_horizons": [
+      13,
+      26,
+      52
+    ],
+    "evidence": "탐색적: 같은 과거 자료로 이미 여러 번 탐색된 비교이며 다중검정 미보정 구간으로 내린 판정입니다. 운영 기본값은 자동으로 바뀌지 않습니다 (최종 확인은 전향 기록).",
+    "reasons": [
+      "Seoul-28 mean relative MAE change is not negative"
+    ],
+    "extra_horizons": {
+      "78": 2.220446049250313e-14,
+      "104": -2.220446049250313e-14
+    }
+  },
+  "C_fill_ratio [Ridge only]": {
+    "verdict": "보류",
+    "score": -0.1728645840726628,
+    "score_horizons": [
+      13,
+      26,
+      52
+    ],
+    "evidence": "탐색적: 같은 과거 자료로 이미 여러 번 탐색된 비교이며 다중검정 미보정 구간으로 내린 판정입니다. 운영 기본값은 자동으로 바뀌지 않습니다 (최종 확인은 전향 기록).",
+    "reasons": [
+      "score -0.17% is above -1.0%",
+      "outside Seoul worsens at 13w by 0.87%",
+      "bootstrap 90% interval excludes zero at only 1 of 3 horizons"
+    ],
+    "extra_horizons": {
+      "78": 1.2612585515287433,
+      "104": 1.7320654998697504
+    }
+  },
+  "C_both [Ridge only]": {
+    "verdict": "보류",
+    "score": -0.1728645840726628,
+    "score_horizons": [
+      13,
+      26,
+      52
+    ],
+    "evidence": "탐색적: 같은 과거 자료로 이미 여러 번 탐색된 비교이며 다중검정 미보정 구간으로 내린 판정입니다. 운영 기본값은 자동으로 바뀌지 않습니다 (최종 확인은 전향 기록).",
+    "reasons": [
+      "score -0.17% is above -1.0%",
+      "outside Seoul worsens at 13w by 0.87%",
+      "bootstrap 90% interval excludes zero at only 1 of 3 horizons"
+    ],
+    "extra_horizons": {
+      "78": 1.2612585515287433,
+      "104": 1.7320654998697504
+    }
+  }
+}

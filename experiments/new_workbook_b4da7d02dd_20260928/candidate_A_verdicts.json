@@ -1,0 +1,122 @@
+{
+  "global_x0.5": {
+    "verdict": "기각",
+    "score": 1.3752457058691474,
+    "score_horizons": [
+      13,
+      26,
+      52
+    ],
+    "evidence": "탐색적: 같은 과거 자료로 이미 여러 번 탐색된 비교이며 다중검정 미보정 구간으로 내린 판정입니다. 운영 기본값은 자동으로 바뀌지 않습니다 (최종 확인은 전향 기록).",
+    "reasons": [
+      "Seoul-28 mean relative MAE change is not negative"
+    ],
+    "horizons_available": [
+      13,
+      26,
+      52,
+      78,
+      104
+    ]
+  },
+  "global_x1.0": {
+    "verdict": "기각",
+    "score": 3.225384772133181,
+    "score_horizons": [
+      13,
+      26,
+      52
+    ],
+    "evidence": "탐색적: 같은 과거 자료로 이미 여러 번 탐색된 비교이며 다중검정 미보정 구간으로 내린 판정입니다. 운영 기본값은 자동으로 바뀌지 않습니다 (최종 확인은 전향 기록).",
+    "reasons": [
+      "Seoul-28 mean relative MAE change is not negative"
+    ],
+    "horizons_available": [
+      13,
+      26,
+      52,
+      78,
+      104
+    ]
+  },
+  "seoul_x0.5": {
+    "verdict": "기각",
+    "score": 0.8302835094620228,
+    "score_horizons": [
+      13,
+      26,
+      52
+    ],
+    "evidence": "탐색적: 같은 과거 자료로 이미 여러 번 탐색된 비교이며 다중검정 미보정 구간으로 내린 판정입니다. 운영 기본값은 자동으로 바뀌지 않습니다 (최종 확인은 전향 기록).",
+    "reasons": [
+      "Seoul-28 mean relative MAE change is not negative"
+    ],
+    "horizons_available": [
+      13,
+      26,
+      52,
+      78,
+      104
+    ]
+  },
+  "seoul_x1.0": {
+    "verdict": "기각",
+    "score": 2.175807451723788,
+    "score_horizons": [
+      13,
+      26,
+      52
+    ],
+    "evidence": "탐색적: 같은 과거 자료로 이미 여러 번 탐색된 비교이며 다중검정 미보정 구간으로 내린 판정입니다. 운영 기본값은 자동으로 바뀌지 않습니다 (최종 확인은 전향 기록).",
+    "reasons": [
+      "Seoul-28 mean relative MAE change is not negative"
+    ],
+    "horizons_available": [
+      13,
+      26,
+      52,
+      78,
+      104
+    ]
+  },
+  "seoul_recent156_x0.5": {
+    "verdict": "기각",
+    "score": 0.764029713742409,
+    "score_horizons": [
+      13,
+      26,
+      52
+    ],
+    "evidence": "탐색적: 같은 과거 자료로 이미 여러 번 탐색된 비교이며 다중검정 미보정 구간으로 내린 판정입니다. 운영 기본값은 자동으로 바뀌지 않습니다 (최종 확인은 전향 기록).",
+    "reasons": [
+      "Seoul-28 mean relative MAE change is not negative"
+    ],
+    "horizons_available": [
+      13,
+      26,
+      52,
+      78,
+      104
+    ]
+  },
+  "A_selected (walk-forward, external 2020+)": {
+    "verdict": "기각",
+    "score": 1.7231923483926066,
+    "score_horizons": [
+      13,
+      26,
+      52
+    ],
+    "evidence": "탐색적: 같은 과거 자료로 이미 여러 번 탐색된 비교이며 다중검정 미보정 구간으로 내린 판정입니다. 운영 기본값은 자동으로 바뀌지 않습니다 (최종 확인은 전향 기록).",
+    "reasons": [
+      "Seoul-28 mean relative MAE change is not negative"
+    ],
+    "horizons_available": [
+      13,
+      26,
+      52,
+      78,
+      104
+    ]
+  }
+}
