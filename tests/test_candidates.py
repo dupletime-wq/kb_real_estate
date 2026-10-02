@@ -328,3 +328,77 @@ def test_reproduction_by_truncation_cannot_verify_the_fingerprint_but_still_chec
     assert ok["verdict"] == "pass" and ok["checks"]["data_fingerprint_equal"] is None
     f2, n2 = _repro_frames(shift_label=0.01)  # a revised history shows up as different labels
     assert _repro(f2, n2, fingerprint="new-file-cut", require_same_fingerprint=False)["verdict"] == "fail"
+
+
+def test_long_memory_and_valuation_features_are_causal_and_defined_as_documented():
+    kb = _kb_with_observed(weeks=420)
+    full = {**C.long_memory_features(kb), **C.valuation_features(kb)}
+    cut = 330
+    part_kb = _truncate(kb, cut)
+    part = {**C.long_memory_features(part_kb), **C.valuation_features(part_kb)}
+    assert set(full) == set(C.FAMILIES["L"]) | set(C.FAMILIES["J"])
+    for name in full:
+        pd.testing.assert_frame_equal(full[name].iloc[:cut], part[name], check_exact=False, atol=1e-9, obj=name)
+    L = np.log(kb.sale)
+    assert np.isclose(full["r104"]["서울특별시"].iloc[200], L["서울특별시"].iloc[200] - L["서울특별시"].iloc[96])
+    assert np.isclose(full["sj_level"]["강남구"].iloc[50], np.log(kb.sale["강남구"].iloc[50] / kb.jeonse["강남구"].iloc[50]))
+    assert full["pdev260"]["서울특별시"].iloc[:155].isna().all() and full["pdev260"]["서울특별시"].iloc[160:].notna().all()  # needs 156 weeks first
+    got = C.build_candidate_features(kb, ("r104", "sj_z156"))
+    assert list(got) == ["r104", "sj_z156"]
+
+
+def test_time_validated_ridge_picks_alpha_per_group_and_never_validates_on_its_own_fit_rows():
+    from kbforecast import models as M
+
+    rng = np.random.default_rng(0)
+    dates = pd.date_range("2010-01-04", periods=260, freq="W-MON")
+    regions = [f"서울{i}" for i in range(15)] + [f"지방{i}" for i in range(45)]
+    idx = pd.MultiIndex.from_product([dates, regions], names=["date", "region"])
+    X = pd.DataFrame(rng.normal(size=(len(idx), 5)), index=idx, columns=list("abcde"))
+    is_seoul = idx.get_level_values("region").str.startswith("서울")
+    # Seoul has a real signal, the rest is pure noise: a group-specific alpha should shrink the rest much harder
+    y = np.where(is_seoul, 0.5 * X["a"].to_numpy(), 0.0) + rng.normal(0, 0.5, len(idx))
+    rec = []
+    fn = M.ridge_model_timeval(13, group_fn=lambda r: "seoul" if r.startswith("서울") else "other", record=rec)
+    pred = fn(X.iloc[:12000], y[:12000], X.iloc[12000:12200])
+    alphas = rec[0]["alpha_by_group"]
+    assert len(pred) == 200 and np.isfinite(pred).all() and alphas["seoul"] < alphas["other"]
+    rec2 = []
+    M.ridge_model_timeval(13, record=rec2)(X.iloc[:12000], y[:12000], X.iloc[12000:12010])
+    assert list(rec2[0]["alpha_by_group"]) == ["0"] and rec2[0]["alpha_by_group"]["0"] in M.ALPHA_GRID
+
+
+def test_long_horizon_script_runs_end_to_end_on_a_stand_in_workbook(tmp_path, monkeypatch, capsys):
+    """scripts/experiment_long_horizon.py with the parser replaced and the reproduction cut skipped; guards the wiring of 52/104/208-week primary horizons."""
+    import importlib.util
+    import sys
+    from pathlib import Path
+
+    from kbforecast import selection as S
+
+    root = Path(__file__).resolve().parents[1]
+    spec = importlib.util.spec_from_file_location("experiment_long_horizon_script", root / "scripts" / "experiment_long_horizon.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    kb = make_panel(weeks=560, extra_cities=60)
+    rng = np.random.default_rng(5)
+    obs = pd.DataFrame(rng.random(kb.sale.shape) > 0.03, index=kb.sale.index, columns=kb.sale.columns)
+    kb = dataclasses.replace(kb, observed={"sale": obs, "jeonse": obs}, fingerprint="standin-long")
+    monkeypatch.setattr(mod, "parse_kb_panel", lambda _bytes: kb)
+    monkeypatch.setattr(mod, "CANDIDATES", ("R_alpha_cv", "L_valuation"))
+    monkeypatch.setattr(S, "EXTERNAL_WINDOWS", (("2016-01-04", "2016-12-31"), ("2017-01-02", "2018-12-31")))
+    monkeypatch.setattr(S, "MIN_INTERNAL_SEOUL_ROWS", 20)
+    wb = tmp_path / "wb.xlsx"
+    wb.write_bytes(b"x")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sys, "argv", ["experiment_long_horizon.py", str(wb), "--n-boot", "30", "--reproduction-cut", "", "--min-train-rows", "1500"])
+    mod.main()
+    text = capsys.readouterr().out
+    out = next((tmp_path / "experiments").glob("long_horizon_*"))
+    assert "EXPLORATORY scorecard (52/104/208 decide" in text and "EXTERNAL validation of the selection procedure" in text and "nothing was added to the app" in text.replace("No production setting was changed and ", "")
+    for name in ("context_model_vs_naive.csv", "candidate_scorecard_exploratory.csv", "selection_history.csv", "run_metadata.json"):
+        assert (out / name).exists(), name
+    sc = pd.read_csv(out / "candidate_scorecard_exploratory.csv")
+    assert set(sc["horizon"]) == {52, 78, 104, 208}
+    v = json.loads((out / "verdicts_exploratory.json").read_text(encoding="utf-8"))
+    assert all(x["score_horizons"] in ([52, 104, 208], [52, 104], [52], [104], [104, 208], [208], [52, 208], []) for x in v.values())

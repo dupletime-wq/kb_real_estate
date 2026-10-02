@@ -10,6 +10,10 @@ Family C  (observation quality; needs `KBPanel.observed`)
     fill_ratio26  share of the last 26 weeks (after the series started) that were filled, not observed
     Whether a sentiment value was observed or estimated from a parent scope has no history before the hub extension, so it is NOT
     reconstructed: it is a live diagnostic and a forward-logging item only (see report.data_diagnostics).
+Family L  (long memory, for 52/104/208-week forecasts; only the sale index): r104 = 104-week log return, pdev156 / pdev260 = log price minus
+    its trailing 156 / 260-week mean (at least 104 / 156 weeks of history).
+Family J  (valuation, needs the jeonse index): sj_level = log sale - log jeonse (minus log of the jeonse-to-sale ratio), sj_dev156 = its deviation from the
+    trailing 156-week mean, sj_z156 = that deviation in units of its trailing 156-week standard deviation. Same definitions as the unused columns of features.py.
 Family V  (monthly trading volume from MOLIT, Seoul city / two halves / 25 districts only; see trades.py for the point-in-time design)
     vol_rel36     log((latest known month + 1) / (mean of the 36 months before it + 1))
     vol_chg3      log((last 3 known months + 1) / (the 3 months before them + 1))
@@ -32,6 +36,8 @@ FAMILIES = {
     "B": ("px_sent", "divergence", "buyer_run"),
     "C": ("obs_age", "fill_ratio26"),
     "V": ("vol_rel36", "vol_chg3", "vol_px_inter"),
+    "L": ("r104", "pdev156", "pdev260"),  # long memory of the price itself (long-horizon round)
+    "J": ("sj_level", "sj_dev156", "sj_z156"),  # price-to-jeonse valuation level and its deviation from the region's own past (long-horizon round)
 }
 ALL_CANDIDATE_FEATURES = tuple(n for names in FAMILIES.values() for n in names)
 
@@ -84,6 +90,25 @@ def quality_features(kb: KBPanel) -> dict[str, pd.DataFrame]:
     return {"obs_age": age, "fill_ratio26": filled.rolling(26, min_periods=13).mean()}
 
 
+def long_memory_features(kb: KBPanel) -> dict[str, pd.DataFrame]:
+    L = np.log(kb.sale.where(kb.sale > 0))
+    return {
+        "r104": L - L.shift(104),
+        "pdev156": L - L.rolling(156, min_periods=104).mean(),
+        "pdev260": L - L.rolling(260, min_periods=156).mean(),
+    }
+
+
+def valuation_features(kb: KBPanel) -> dict[str, pd.DataFrame]:
+    L = np.log(kb.sale.where(kb.sale > 0))
+    LJ = np.log(kb.jeonse.where(kb.jeonse > 0))
+    if not LJ.notna().any().any():
+        return {}
+    sj = L - LJ
+    dev = sj - sj.rolling(156, min_periods=78).mean()
+    return {"sj_level": sj, "sj_dev156": dev, "sj_z156": dev / sj.rolling(156, min_periods=78).std().replace(0, np.nan)}
+
+
 def monthly_net_counts(history: pd.DataFrame) -> pd.DataFrame:
     """Monthly net deals (reported - cancelled) per district code from the daily history; index = month end."""
     days = pd.to_datetime(history["deal_date"])
@@ -131,6 +156,10 @@ def build_candidate_features(kb: KBPanel, names: tuple[str, ...], history: pd.Da
         out.update(sentiment_price_features(kb))
     if any(n in FAMILIES["C"] for n in names):
         out.update(quality_features(kb))
+    if any(n in FAMILIES["L"] for n in names):
+        out.update(long_memory_features(kb))
+    if any(n in FAMILIES["J"] for n in names):
+        out.update(valuation_features(kb))
     if any(n in FAMILIES["V"] for n in names):
         if history is None:
             raise ValueError("volume features need the trade history (trade_history/<date>/seoul_daily_counts.csv.gz)")

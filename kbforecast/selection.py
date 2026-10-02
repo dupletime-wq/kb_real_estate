@@ -112,5 +112,5 @@ def external_report(ext: dict[int, pd.DataFrame], n_boot: int = 2000, primary: t
     for h, f in ext.items():
         groups = {k: v for k, v in E.region_sets(f.index.get_level_values("region").unique()).items() if v}
         per_h[h] = E.compare(f[["y", "base", "sel"]], "base", "sel", h, groups, n_boot)
-    return {"per_horizon": per_h, "decision": E.decide({h: r for h, r in per_h.items() if h in primary}), "share_baseline_chosen": {
+    return {"per_horizon": per_h, "decision": E.decide({h: r for h, r in per_h.items() if h in primary}, primary=primary), "share_baseline_chosen": {
         h: float((f["chosen"] == base).mean()) for h, f in ext.items()}}

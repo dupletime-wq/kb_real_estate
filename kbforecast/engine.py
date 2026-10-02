@@ -64,15 +64,30 @@ def model_columns(fs: FeatureSet, use_macro: bool = False) -> list[str]:
     return [c for c in cols if c not in PRUNED_FEATURES]
 
 
-def blend_model(horizon: int, hgb_mode: str = "auto", record: list | None = None) -> M.ModelFn:
+def ridge_component(horizon: int, ridge_mode: str = "fixed", record: list | None = None) -> M.ModelFn:
+    """The Ridge half of an anchor's model: the validated alpha per horizon, or an alpha chosen on a purged time-ordered validation block
+    ('alpha_cv'), or one alpha for the Seoul series and one for the rest ('group_alpha_cv')."""
+    if ridge_mode == "fixed":
+        return M.ridge_model(RIDGE_ALPHA.get(horizon, 100000.0))
+    if ridge_mode == "alpha_cv":
+        return M.ridge_model_timeval(horizon, record=record)
+    if ridge_mode == "group_alpha_cv":
+        from .trades import SEOUL_GROUPS, SEOUL_GU_CODES
+
+        seoul = set(SEOUL_GU_CODES) | set(SEOUL_GROUPS) | {"서울특별시"}
+        return M.ridge_model_timeval(horizon, group_fn=lambda r: "seoul" if r in seoul else "other", record=record)
+    raise ValueError(f"unknown ridge_mode {ridge_mode!r}")
+
+
+def blend_model(horizon: int, hgb_mode: str = "auto", record: list | None = None, ridge_mode: str = "fixed", ridge_record: list | None = None) -> M.ModelFn:
     """Production model of one anchor: Ridge alone from `LONG_HORIZON`, else the equal-weight Ridge + HGB blend.
 
     hgb_mode: "auto" (default, production: scikit-learn's automatic early stopping), "fixed" (no early stopping, the configured number of
     iterations) or "timeval" (iteration count chosen on a purged, time-ordered block of the training window). `record` collects HGB fits.
     """
-    alpha = RIDGE_ALPHA.get(horizon, 100000.0)
+    ridge = ridge_component(horizon, ridge_mode, ridge_record)
     if horizon >= LONG_HORIZON:
-        return M.ridge_model(alpha)
+        return ridge
     hgb_kw = dict(HGB_KW.get(horizon, HGB_KW["default"]))
     if hgb_mode == "auto":
         hgb = M.hgb_model(record=record, **hgb_kw)
@@ -83,7 +98,7 @@ def blend_model(horizon: int, hgb_mode: str = "auto", record: list | None = None
         hgb = M.hgb_model_timeval(purge_weeks=horizon, max_iter=2 * hgb_kw.get("max_iter", 200), record=record, **kw)
     else:
         raise ValueError(f"unknown hgb_mode {hgb_mode!r}")
-    return M.blend([M.ridge_model(alpha), hgb])
+    return M.blend([ridge, hgb])
 
 
 @dataclass(frozen=True)
@@ -151,7 +166,7 @@ def fit_engine(
             progress(i, len(anchors), f"{h}주 예측 모델 학습·검증 중")
         cfg = WFConfig(horizon=h, first_origin=first_origin, eval_step=eval_step, refit_every=refit_every)
         y = make_targets(fs.log_price, h, observed)
-        model_fn = blend_model(h, variant.hgb_mode)
+        model_fn = blend_model(h, variant.hgb_mode, ridge_mode=variant.ridge_mode)
         pred = walk_forward(fs, cols, model_fn, cfg, y=y)
         pred = _append_live_origin(fs, cols, model_fn, h, pred, cfg, y)
         if z_rate is not None and seoul and h <= overlay_max_horizon:

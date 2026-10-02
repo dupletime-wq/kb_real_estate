@@ -15,6 +15,7 @@ class EngineVariant:
     name: str = "current"
     extra_features: tuple[str, ...] = ()  # names from candidates.ALL_CANDIDATE_FEATURES, appended to the model columns
     hgb_mode: str = "auto"  # "auto" = scikit-learn default early stopping (production), "fixed" = no early stopping, "timeval" = purged time-ordered validation
+    ridge_mode: str = "fixed"  # "fixed" = the validated alpha per horizon (production), "alpha_cv" = purged time-validated alpha, "group_alpha_cv" = one alpha for Seoul and one for the rest
     bias: BiasCfg | None = None  # median-residual correction applied after the rate overlay
     volume_extra_lag_weeks: int = 0  # sensitivity of the volume features to the assumed reporting lag
 
@@ -45,4 +46,10 @@ NAMED_VARIANTS: dict[str, EngineVariant] = {
     "V_chg3": EngineVariant("V_chg3", ("vol_chg3",)),
     "V_px_inter": EngineVariant("V_px_inter", ("vol_px_inter",)),
     "V_all": EngineVariant("V_all", ("vol_rel36", "vol_chg3", "vol_px_inter")),
+    # long-horizon round (52 / 104 / 208 weeks)
+    "R_alpha_cv": EngineVariant("R_alpha_cv", ridge_mode="alpha_cv"),
+    "R_group_alpha": EngineVariant("R_group_alpha", ridge_mode="group_alpha_cv"),
+    "L_longmem": EngineVariant("L_longmem", ("r104", "pdev156", "pdev260")),
+    "L_valuation": EngineVariant("L_valuation", ("sj_level", "sj_dev156", "sj_z156")),
+    "L_all": EngineVariant("L_all", ("r104", "pdev156", "pdev260", "sj_level", "sj_dev156", "sj_z156")),
 }

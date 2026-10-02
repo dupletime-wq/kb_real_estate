@@ -94,7 +94,7 @@ def test_experiment_log_counts_candidates_and_tests_and_annotates_p_values(tmp_p
     for i in range(4):
         log.record(f"c{i}", "A", {"k": i}, [13], {"score": -0.1 * i})
     log.record("c1", "A", {"k": 1}, [26], {})  # same candidate on another horizon: not a new candidate, but a new test
-    log.record("c1", "A", {"k": 1}, [104], {})  # a non-primary horizon never counts as a test
+    log.record("c1", "A", {"k": 1}, [78], {})  # a horizon that decides in neither round (78w) never counts as a test
     log.record("overlay", "reference", {}, [52], {})  # reference comparisons are not tries
     assert log.n_candidates() == 4 and log.n_tests() == 5 and log.families() == {"A": 4}
     assert np.isclose(log.adjusted_p(0.02), 0.10) and log.adjusted_p(0.02, include_prior=True) == 1.0
@@ -110,3 +110,13 @@ def test_verdict_marks_evidence_and_names_the_horizons_behind_the_score():
     d = E.decide(only52)
     assert d["score_horizons"] == [52] and d["verdict"] == "기각" and any("missing" in r and "not a 13/26/52-week average" in r for r in d["reasons"])
     assert "탐색적" in d["evidence"] and E.decide({h: _per_h(-3.0) for h in E.PRIMARY_HORIZONS})["score_horizons"] == [13, 26, 52]
+
+
+def test_decide_uses_the_horizons_it_is_given():
+    long_primary = (52, 104, 208)
+    adopt = {h: _per_h(-3.0) for h in long_primary}
+    d = E.decide(adopt, primary=long_primary)
+    assert d["verdict"] == "채택" and d["score_horizons"] == [52, 104, 208]
+    short_only = E.decide({h: _per_h(-3.0) for h in (13, 26, 52)}, primary=long_primary)
+    assert short_only["score_horizons"] == [52] and short_only["verdict"] != "채택" and any("208" in r and "not a 52/104/208-week average" in r for r in short_only["reasons"])
+    assert E.selection_score({52: _per_h(-1.0), 104: _per_h(-3.0), 208: _per_h(-5.0)}, long_primary) == -3.0  # each horizon counts equally

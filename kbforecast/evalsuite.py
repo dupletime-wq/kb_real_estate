@@ -204,28 +204,29 @@ def compare(frame: pd.DataFrame, base: str, cand: str, horizon: int, groups: dic
     return out
 
 
-def selection_horizons(per_horizon: dict[int, dict]) -> list[int]:
+def selection_horizons(per_horizon: dict[int, dict], primary: tuple[int, ...] = PRIMARY_HORIZONS) -> list[int]:
     """The primary horizons for which a Seoul-28 comparison exists."""
-    return [h for h in PRIMARY_HORIZONS if h in per_horizon and "서울 28" in per_horizon[h]["groups"]]
+    return [h for h in primary if h in per_horizon and "서울 28" in per_horizon[h]["groups"]]
 
 
-def selection_score(per_horizon: dict[int, dict]) -> float:
+def selection_score(per_horizon: dict[int, dict], primary: tuple[int, ...] = PRIMARY_HORIZONS) -> float:
     """Pre-set primary criterion: mean over 13/26/52w of the Seoul-28 relative MAE change (%). Each horizon counts equally, so the
     larger errors of longer horizons cannot dominate. If a primary horizon is missing the mean covers only the horizons that exist
     (see `selection_horizons`) and the verdict can never be 채택: such a number must not be described as a 13/26/52-week average."""
-    vals = [per_horizon[h]["groups"]["서울 28"]["rel_MAE_pct"] for h in selection_horizons(per_horizon)]
+    vals = [per_horizon[h]["groups"]["서울 28"]["rel_MAE_pct"] for h in selection_horizons(per_horizon, primary)]
     return float(np.mean(vals)) if vals else float("nan")
 
 
-def decide(per_horizon: dict[int, dict], outside_unchanged_by_design: bool = False) -> dict:
+def decide(per_horizon: dict[int, dict], outside_unchanged_by_design: bool = False, primary: tuple[int, ...] = PRIMARY_HORIZONS) -> dict:
     """Pre-set rule. 채택 (adopt) only if every check passes; 보류 (hold: log forward, keep the current model) if the score is negative but a
     check fails; 기각 (reject) if the score is not negative. Missing horizons make the verdict 보류 at best."""
     reasons: list[str] = []
-    score = selection_score(per_horizon)
-    have = selection_horizons(per_horizon)
+    score = selection_score(per_horizon, primary)
+    have = selection_horizons(per_horizon, primary)
     base = {"score": score, "score_horizons": have, "evidence": EVIDENCE_LEVEL}
-    if len(have) < len(PRIMARY_HORIZONS):
-        reasons.append(f"score covers only {have}; primary horizons {sorted(set(PRIMARY_HORIZONS) - set(have))} are missing, so it is not a 13/26/52-week average")
+    label = "/".join(str(h) for h in primary)
+    if len(have) < len(primary):
+        reasons.append(f"score covers only {have}; primary horizons {sorted(set(primary) - set(have))} are missing, so it is not a {label}-week average")
     if not np.isfinite(score) or score >= 0:
         return {"verdict": "기각", **base, "reasons": reasons + ["Seoul-28 mean relative MAE change is not negative"]}
     ok = True
@@ -247,10 +248,10 @@ def decide(per_horizon: dict[int, dict], outside_unchanged_by_design: bool = Fal
             ok = False
             reasons.append(f"period {pname} worsens by {np.mean(vals):.2f}% (avg over horizons)")
     n_sig = sum(1 for h in have if per_horizon[h]["groups"]["서울 28"]["boot_abs"]["rel_hi_pct"] < 0)
-    if n_sig < 2:
+    if n_sig < min(2, len(primary)):
         ok = False
         reasons.append(f"bootstrap {int(BOOT_LEVEL * 100)}% interval excludes zero at only {n_sig} of {len(have)} horizons")
-    if len(have) < len(PRIMARY_HORIZONS):
+    if len(have) < len(primary):
         ok = False
     return {"verdict": "채택" if ok else "보류", **base, "reasons": reasons}
 
@@ -280,8 +281,9 @@ class ExperimentLog:
         """Distinct candidates tried (family 'reference' entries are comparisons of existing settings, not new tries)."""
         return len({(e["family"], e["candidate"]) for e in self.entries() if e["family"] != "reference"})
 
-    def n_tests(self, horizons: tuple[int, ...] = PRIMARY_HORIZONS) -> int:
-        """Distinct (family, candidate, horizon) comparisons at the primary horizons that are in this log (reference comparisons excluded)."""
+    def n_tests(self, horizons: tuple[int, ...] = (13, 26, 52, 104, 208)) -> int:
+        """Distinct (family, candidate, horizon) comparisons at the horizons that decide (13/26/52 for the short-horizon round, 52/104/208 for
+        the long-horizon round; every horizon actually tested counts once; reference comparisons excluded)."""
         seen = set()
         for e in self.entries():
             if e["family"] == "reference":

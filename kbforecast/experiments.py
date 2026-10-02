@@ -16,7 +16,7 @@ from . import evalsuite as E
 from . import models as M
 from .calibration import BIAS_CANDIDATES, median_bias_correction, walk_forward_select
 from .candidates import build_candidate_features, with_candidates
-from .engine import OVERLAY_MAX_HORIZON, RIDGE_ALPHA, blend_model, model_columns
+from .engine import OVERLAY_MAX_HORIZON, RIDGE_ALPHA, blend_model, model_columns, ridge_component
 from .evaluation import WFConfig, walk_forward
 from .features import FeatureSet, build_features, make_targets
 from .kb_panel import KBPanel, seoul_region_keys
@@ -29,7 +29,7 @@ FROZEN_HORIZONS = (13, 26, 52, 78, 104)
 
 
 # ----------------------------------------------------------------------------- frozen predictions (no workbook)
-def load_frozen_baselines(long_dir: Path = FROZEN_LONG, volume_dir: Path = FROZEN_VOLUME) -> tuple[dict[int, pd.DataFrame], pd.DatetimeIndex, dict]:
+def load_frozen_baselines(long_dir: Path = FROZEN_LONG, volume_dir: Path = FROZEN_VOLUME, horizons: tuple[int, ...] = FROZEN_HORIZONS) -> tuple[dict[int, pd.DataFrame], pd.DatetimeIndex, dict]:
     """h -> frame indexed (date, region): y, raw (blend), pred (final baseline forecast), r26 (trailing 26-week return at the origin if stored).
 
     52/78/104 weeks: every region, from validate_long. 13/26 weeks: the 28 Seoul series only, from validate_volume (its `base` column).
@@ -43,7 +43,7 @@ def load_frozen_baselines(long_dir: Path = FROZEN_LONG, volume_dir: Path = FROZE
     frames: dict[int, pd.DataFrame] = {}
     notes: dict = {"overlay_check_h52": None}
     vol = pd.read_csv(volume_dir / "predictions_seoul.csv.gz", parse_dates=["date"])
-    for h in FROZEN_HORIZONS:
+    for h in horizons:
         if h in (13, 26):
             d = vol[vol["horizon"] == h].set_index(["date", "region"]).sort_index()
             f = pd.DataFrame({"y": d["y"], "raw": d["base"], "r26": np.nan})
@@ -125,6 +125,38 @@ class RunConfig:
         return WFConfig(horizon=h, first_origin=self.first_origin, eval_step=self.eval_step, refit_every=self.refit_every, min_train_rows=self.min_train_rows)
 
 
+def naive_context(kb: KBPanel, cfg: RunConfig, horizons: tuple[int, ...], rate=None, cd=None) -> pd.DataFrame:
+    """MAE of the baseline model against two naive forecasts on identical rows: the pooled historical mean (refit on the model's schedule from the
+    closed labels) and 'no change'. Shows how much of a long-horizon forecast is more than 'prices usually rise'."""
+    fs = build_features(kb)
+    cols = model_columns(fs)
+    dates = fs.log_price.index
+    seoul = seoul_region_keys(kb.hierarchy) & set(fs.log_price.columns)
+    z_rate = rate_signal_weekly(rate or load_base_rate(None), cd or load_cd91(None), dates)
+    observed = kb.observed["sale"] if kb.observed is not None else None
+
+    def const(Xtr, ytr, Xp):
+        return np.full(len(Xp), float(np.mean(ytr)))
+
+    rows = []
+    for h in horizons:
+        y = make_targets(fs.log_price, h, observed)
+        base = variant_frame(kb, fs, cols, CURRENT, h, y, cfg, z_rate, seoul)
+        mean = walk_forward(fs, ["r1"], const, cfg.wf(h), y=y)
+        wide = pd.DataFrame({"y": base["y"], "model": base["pred"], "pooled_mean": mean["pred"].reindex(base.index), "no_change": 0.0}).dropna()
+        for gname, regs in E.region_sets(wide.index.get_level_values("region").unique()).items():
+            sub = wide[wide.index.get_level_values("region").isin(regs)] if regs else wide.iloc[0:0]
+            if sub.empty:
+                continue
+            row = {"horizon": h, "group": gname, "n": int(len(sub))}
+            for m in ("model", "pooled_mean", "no_change"):
+                row[f"MAE_{m}"] = float((sub[m] - sub["y"]).abs().mean() * 100)
+                row[f"bias_{m}"] = float((sub[m] - sub["y"]).mean() * 100)
+            row["model_vs_pooled_mean_pct"] = (row["MAE_model"] / row["MAE_pooled_mean"] - 1) * 100
+            rows.append(row)
+    return pd.DataFrame(rows)
+
+
 def mask_targets(y: pd.Series, start: pd.Timestamp | None) -> pd.Series:
     """Drop the labels of origins before `start` (NaN): neither training nor scoring can use them. None leaves y untouched."""
     return y if start is None else y.where(y.index.get_level_values("date") >= pd.Timestamp(start))
@@ -140,7 +172,7 @@ def variant_frame(
     if variant.extra_features:
         fsv = with_candidates(fs, build_candidate_features(kb, variant.extra_features, volume_history, variant.volume_extra_lag_weeks))
         colsv = colsv + [c for c in variant.extra_features if c not in colsv]
-    model_fn = M.ridge_model(RIDGE_ALPHA.get(h, 1e5)) if ridge_only else blend_model(h, variant.hgb_mode, hgb_record)
+    model_fn = ridge_component(h, variant.ridge_mode) if ridge_only else blend_model(h, variant.hgb_mode, hgb_record, variant.ridge_mode)
     pred = walk_forward(fsv, colsv, model_fn, cfg.wf(h), y=y)
     pred["pred_raw"] = pred["pred"]
     if not ridge_only and z_rate is not None and h <= OVERLAY_MAX_HORIZON:
@@ -227,7 +259,7 @@ def run_feature_experiments(
     verdicts = {}
     for name, per_h in results.items():
         primary = {h: r for h, r in per_h.items() if h in cfg.primary}
-        verdicts[name] = {**E.decide(primary), "extra_horizons": {h: per_h[h]["groups"]["서울 28"]["rel_MAE_pct"] for h in per_h if h in cfg.extra}}
+        verdicts[name] = {**E.decide(primary, primary=cfg.primary), "extra_horizons": {h: per_h[h]["groups"]["서울 28"]["rel_MAE_pct"] for h in per_h if h in cfg.extra}}
     rows = []
     for name, per_h in results.items():
         for h, r in per_h.items():

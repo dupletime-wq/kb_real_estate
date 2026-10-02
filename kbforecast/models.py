@@ -49,6 +49,59 @@ def _hgb(max_iter: int, learning_rate: float, max_leaf_nodes: int, min_samples_l
     )
 
 
+ALPHA_GRID = (3e3, 1e4, 3e4, 1e5, 3e5, 1e6)
+
+
+def _std_pair(a: pd.DataFrame, b: pd.DataFrame):
+    return _prepare(a, b)
+
+
+def ridge_model_timeval(purge_weeks: int, alphas: tuple[float, ...] = ALPHA_GRID, val_share: float = 0.2, group_fn=None, record: list | None = None) -> ModelFn:
+    """Ridge whose shrinkage is chosen on a purged, time-ordered validation block inside the training window (MAE, the evaluation metric).
+
+    The newest `val_share` of the training dates validates, fit rows end `purge_weeks` (the horizon) before it. The winning alpha refits on all rows.
+    With `group_fn(region) -> label` every group gets its own alpha, chosen on that group's validation rows, and predicts its own rows: the
+    pooled coefficients are the same family of models, only the amount of shrinkage differs by group (e.g. Seoul vs the rest).
+    """
+
+    def fit_predict(X_train: pd.DataFrame, y_train: np.ndarray, X_pred: pd.DataFrame) -> np.ndarray:
+        regions_tr = np.asarray(X_train.index.get_level_values("region"))
+        regions_pr = np.asarray(X_pred.index.get_level_values("region"))
+        lab_tr = np.asarray([group_fn(r) for r in regions_tr]) if group_fn else np.zeros(len(regions_tr), dtype=object)
+        lab_pr = np.asarray([group_fn(r) for r in regions_pr]) if group_fn else np.zeros(len(regions_pr), dtype=object)
+        fit_rows, val_rows = time_split_masks(X_train.index.get_level_values("date"), purge_weeks, val_share)
+        best = {g: float(alphas[len(alphas) // 2]) for g in np.unique(lab_tr)}
+        if fit_rows.sum() >= 2000 and val_rows.sum() >= 500:
+            a, b = _prepare(X_train[fit_rows], X_train[val_rows])
+            yt = y_train[fit_rows]
+            yv = y_train[val_rows]
+            mu = float(np.mean(yt))
+            lv = lab_tr[val_rows]
+            errs = {g: [] for g in best}
+            for alpha in alphas:
+                pred = Ridge(alpha=alpha).fit(a, yt - mu).predict(b) + mu
+                for g in best:
+                    m = lv == g
+                    errs[g].append(float(np.mean(np.abs(pred[m] - yv[m]))) if m.any() else np.inf)
+            best = {g: float(alphas[int(np.argmin(e))]) if np.isfinite(min(e)) else best[g] for g, e in errs.items()}
+        A, B = _prepare(X_train, X_pred)
+        mu_all = float(np.mean(y_train))
+        out = np.empty(len(X_pred))
+        for alpha in sorted(set(best.values())):
+            groups = [g for g, v in best.items() if v == alpha]
+            sel = np.isin(lab_pr, groups)
+            if sel.any():
+                out[sel] = Ridge(alpha=alpha).fit(A, y_train - mu_all).predict(B[sel]) + mu_all
+        unseen = ~np.isin(lab_pr, list(best))  # a group with no training rows keeps the middle alpha
+        if unseen.any():
+            out[unseen] = Ridge(alpha=float(alphas[len(alphas) // 2])).fit(A, y_train - mu_all).predict(B[unseen]) + mu_all
+        if record is not None:
+            record.append({"alpha_by_group": {str(g): v for g, v in best.items()}, "n_train": int(len(X_train))})
+        return out
+
+    return fit_predict
+
+
 def hgb_model(
     max_iter: int = 200,
     learning_rate: float = 0.04,
