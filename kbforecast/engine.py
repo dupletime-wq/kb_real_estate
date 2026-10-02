@@ -18,9 +18,12 @@ import pandas as pd
 from . import models as M
 from .evaluation import WFConfig, baseline_predictions, pooled_mean_baseline, walk_forward
 from .features import FeatureSet, build_features, make_targets
+from .calibration import median_bias_correction
+from .candidates import build_candidate_features, with_candidates
 from .intervals import conformal_quantiles, interval_score, scale_from_vol
 from .kb_panel import KBPanel, seoul_region_keys
 from .overlay import RateSeries, apply_seoul_rate_overlay, rate_change_weekly, rate_signal_weekly
+from .variants import CURRENT, EngineVariant
 
 ENGINE_VERSION = "v7"  # bump when model/feature/interval settings change (invalidates on-disk caches)
 ANCHORS = (4, 8, 13, 20, 26, 39, 52, 78, 104)
@@ -61,12 +64,26 @@ def model_columns(fs: FeatureSet, use_macro: bool = False) -> list[str]:
     return [c for c in cols if c not in PRUNED_FEATURES]
 
 
-def blend_model(horizon: int) -> M.ModelFn:
+def blend_model(horizon: int, hgb_mode: str = "auto", record: list | None = None) -> M.ModelFn:
+    """Production model of one anchor: Ridge alone from `LONG_HORIZON`, else the equal-weight Ridge + HGB blend.
+
+    hgb_mode: "auto" (default, production: scikit-learn's automatic early stopping), "fixed" (no early stopping, the configured number of
+    iterations) or "timeval" (iteration count chosen on a purged, time-ordered block of the training window). `record` collects HGB fits.
+    """
     alpha = RIDGE_ALPHA.get(horizon, 100000.0)
     if horizon >= LONG_HORIZON:
         return M.ridge_model(alpha)
-    hgb_kw = HGB_KW.get(horizon, HGB_KW["default"])
-    return M.blend([M.ridge_model(alpha), M.hgb_model(**hgb_kw)])
+    hgb_kw = dict(HGB_KW.get(horizon, HGB_KW["default"]))
+    if hgb_mode == "auto":
+        hgb = M.hgb_model(record=record, **hgb_kw)
+    elif hgb_mode == "fixed":
+        hgb = M.hgb_model(early_stopping=False, record=record, **hgb_kw)
+    elif hgb_mode == "timeval":
+        kw = {k: v for k, v in hgb_kw.items() if k != "max_iter"}
+        hgb = M.hgb_model_timeval(purge_weeks=horizon, max_iter=2 * hgb_kw.get("max_iter", 200), record=record, **kw)
+    else:
+        raise ValueError(f"unknown hgb_mode {hgb_mode!r}")
+    return M.blend([M.ridge_model(alpha), hgb])
 
 
 @dataclass(frozen=True)
@@ -100,6 +117,8 @@ def fit_engine(
     progress: Callable[[int, int, str], None] | None = None,
     overlay_max_horizon: int = OVERLAY_MAX_HORIZON,
     observed_only: bool = True,
+    variant: EngineVariant | None = None,
+    volume_history: "pd.DataFrame | None" = None,
 ) -> EngineFit:
     """Walk-forward fit at every anchor horizon (also yields the live-origin forecasts and calibrated intervals).
 
@@ -108,8 +127,12 @@ def fit_engine(
     their intervals are calibrated on its own residuals). With `observed_only` (and a panel that records observations) a training or
     validation label exists only where the origin price and the price h weeks later were actual observations, never filled values.
     """
+    variant = variant or CURRENT
     fs = build_features(kb, macro_weekly if use_macro else None)
     cols = model_columns(fs, use_macro)
+    if variant.extra_features:
+        fs = with_candidates(fs, build_candidate_features(kb, variant.extra_features, volume_history, variant.volume_extra_lag_weeks))
+        cols = cols + [c for c in variant.extra_features if c not in cols]
     dates = fs.log_price.index
     if first_origin is None:
         first_origin = "2014-01-06"  # the validated walk-forward start; the overlay slope needs the 2022-23 tightening in-sample
@@ -128,8 +151,9 @@ def fit_engine(
             progress(i, len(anchors), f"{h}주 예측 모델 학습·검증 중")
         cfg = WFConfig(horizon=h, first_origin=first_origin, eval_step=eval_step, refit_every=refit_every)
         y = make_targets(fs.log_price, h, observed)
-        pred = walk_forward(fs, cols, blend_model(h), cfg, y=y)
-        pred = _append_live_origin(fs, cols, blend_model(h), h, pred, cfg, y)
+        model_fn = blend_model(h, variant.hgb_mode)
+        pred = walk_forward(fs, cols, model_fn, cfg, y=y)
+        pred = _append_live_origin(fs, cols, model_fn, h, pred, cfg, y)
         if z_rate is not None and seoul and h <= overlay_max_horizon:
             pred, slopes = apply_seoul_rate_overlay(pred, z_rate, h, dates, seoul)
             overlay_info[h] = {
@@ -141,6 +165,8 @@ def fit_engine(
                 "rate_source": rate.source,
                 "cd_known_through": str(cd.known_through.date()) if cd is not None else "",
             }
+        if variant.bias is not None:  # order: model -> rate overlay -> median-residual correction (residuals of the overlay-adjusted forecast)
+            pred, _ = median_bias_correction(pred, dates, h, variant.bias, seoul)
         lq, uq = CONFORMAL_LEVELS.get(h, (0.05, 0.95))
         preds[h] = conformal_quantiles(pred, scale_from_vol(vol, h), h, dates, lower_q=lq, upper_q=uq, window_weeks=260)
         bases[h] = pd.DataFrame(
@@ -161,6 +187,8 @@ def fit_engine(
     settings["overlay_max_horizon"] = overlay_max_horizon
     settings["observed_only_labels"] = observed is not None
     settings["interval_target"] = INTERVAL_TARGET
+    if not variant.is_current:
+        settings["variant"] = variant.as_dict()
     return EngineFit(fs.log_price, tuple(anchors), cols, preds, bases, contrib, kb.hierarchy, kb.fingerprint, dates[-1], use_macro, settings, overlay_info)
 
 

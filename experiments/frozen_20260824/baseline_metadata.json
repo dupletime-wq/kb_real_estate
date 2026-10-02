@@ -109,7 +109,7 @@
     "max_abs_diff_recomputed_vs_stored": 1.0016220490433048e-05
   },
   "this_run": {
-    "git_commit": "c6857416059dcef24d44c29cfdd17742e961c2bb",
+    "git_commit": "b6576ba3585b0298aab3a1f59946b8296c7b65be+dirty",
     "python": "3.11.15",
     "numpy": "2.4.6",
     "pandas": "3.0.6",

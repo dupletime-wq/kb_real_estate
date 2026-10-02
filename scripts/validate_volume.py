@@ -31,7 +31,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from kbforecast.engine import blend_model, model_columns  # noqa: E402
 from kbforecast.evaluation import PERIODS, WFConfig, walk_forward  # noqa: E402
 from kbforecast.features import build_features, make_targets  # noqa: E402
-from kbforecast.forecastlog import git_commit  # noqa: E402
+from kbforecast.forecastlog import git_commit, library_versions  # noqa: E402
 from kbforecast.kb_panel import parse_kb_panel, seoul_region_keys  # noqa: E402
 from kbforecast.trades import ASSUMED_LAG_WEEKS, LAG_SWITCH, seoul_weekly, volume_features, weekly_net_and_gross  # noqa: E402
 
@@ -75,7 +75,7 @@ def main() -> None:
     }
     run_dir = args.out_dir / f"volume_{dates[-1]:%Y%m%d}"
     run_dir.mkdir(parents=True, exist_ok=True)
-    config = {"script": "scripts/validate_volume.py", "git_commit": git_commit(Path(__file__).resolve().parents[1]), "history_file": str(history_path),
+    config = {"script": "scripts/validate_volume.py", "git_commit": git_commit(Path(__file__).resolve().parents[1]), "versions": library_versions(), "history_file": str(history_path),
               "data_fingerprint": kb.fingerprint, "last_date": str(dates[-1].date()), "lag_weeks": ASSUMED_LAG_WEEKS, "lag_switch_asof": str(LAG_SWITCH.date()),
               "features": ["tv_ratio", "tv_chg13"], "horizons": list(HORIZONS), "labels": "observed-only", "refit_every": 26, "eval_step": 2}
     (run_dir / "config.json").write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")

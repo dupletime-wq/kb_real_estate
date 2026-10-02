@@ -25,48 +25,13 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from kbforecast import evalsuite as E  # noqa: E402
-from kbforecast.calibration import BIAS_CANDIDATES, median_bias_correction, walk_forward_select  # noqa: E402
+from kbforecast.experiments import candidate_A_report, load_frozen_baselines  # noqa: E402
 from kbforecast.forecastlog import git_commit  # noqa: E402
-from kbforecast.overlay import apply_seoul_rate_overlay, load_base_rate, load_cd91, rate_signal_weekly  # noqa: E402
 
 LONG = Path("validation_runs/long_observed_20260824")
-VOLUME = Path("validation_runs/volume_20260824")
 HORIZONS = (13, 26, 52, 78, 104)
 pd.set_option("display.width", 220)
 pd.set_option("display.max_columns", 30)
-
-
-def load_baselines() -> tuple[dict[int, pd.DataFrame], pd.DatetimeIndex, dict]:
-    """h -> frame indexed (date, region) with y, raw (blend), pred (final baseline forecast), r26 (trailing 26-week return at the origin, if stored)."""
-    cfg_long = json.loads((LONG / "config.json").read_text(encoding="utf-8"))
-    cfg_vol = json.loads((VOLUME / "config.json").read_text(encoding="utf-8"))
-    dates = pd.date_range("2008-04-07", cfg_long["last_date"], freq="W-MON")
-    z = rate_signal_weekly(load_base_rate(None), load_cd91(None), dates)
-    frames: dict[int, pd.DataFrame] = {}
-    notes: dict = {"overlay_check_h52": None}
-    vol = pd.read_csv(VOLUME / "predictions_seoul.csv.gz", parse_dates=["date"])
-    for h in HORIZONS:
-        if h in (13, 26):
-            d = vol[vol["horizon"] == h].set_index(["date", "region"]).sort_index()
-            f = pd.DataFrame({"y": d["y"], "raw": d["base"], "r26": np.nan})
-            seoul = set(E.region_sets(f.index.get_level_values("region").unique())["서울 28"])
-            adj, _ = apply_seoul_rate_overlay(f[["y", "raw"]].rename(columns={"raw": "pred"}), z, h, dates, seoul)
-            f["pred"] = adj["pred"]
-        else:
-            d = pd.read_csv(LONG / f"predictions_h{h}.csv.gz", parse_dates=["date"]).set_index(["date", "region"]).sort_index()
-            f = pd.DataFrame({"y": d["y"], "raw": d["model"], "r26": d["drift26"] * 26.0 / h})
-            if h <= 52:
-                f["pred"] = d["model+overlay"]
-                seoul = set(E.region_sets(f.index.get_level_values("region").unique())["서울 28"])
-                adj, _ = apply_seoul_rate_overlay(f[["y", "raw"]].rename(columns={"raw": "pred"}), z, h, dates, seoul)
-                m = adj["pred"].to_numpy() - f["pred"].to_numpy()
-                notes["overlay_check_h52"] = {"max_abs_diff_recomputed_vs_stored": float(np.nanmax(np.abs(m)))}
-            else:
-                f["pred"] = f["raw"]
-        frames[h] = f
-    meta = {"long_config": {k: cfg_long[k] for k in ("git_commit", "data_fingerprint", "last_date", "labels", "engine_version", "refit_every", "eval_step", "first_origin", "ridge_alpha", "interval_levels")},
-            "long_feature_columns": cfg_long["feature_columns"], "volume_config": {k: cfg_vol[k] for k in ("git_commit", "data_fingerprint", "labels", "refit_every")}, **notes}
-    return frames, dates, meta
 
 
 def main() -> None:
@@ -76,7 +41,7 @@ def main() -> None:
     args = parser.parse_args()
     out = args.out_dir
     out.mkdir(parents=True, exist_ok=True)
-    frames, dates, meta = load_baselines()
+    frames, dates, meta = load_frozen_baselines()
     import sklearn, scipy  # noqa: E401
 
     meta["this_run"] = {"git_commit": git_commit(Path(__file__).resolve().parents[1]), "python": platform.python_version(), "numpy": np.__version__, "pandas": pd.__version__, "scipy": scipy.__version__, "scikit_learn": sklearn.__version__}
@@ -117,45 +82,10 @@ def main() -> None:
 
     # --- candidate A: median-residual correction
     log = E.ExperimentLog(Path("experiments/log.jsonl"))
-    rows, per_cand = [], {}
-    external_start = pd.Timestamp("2020-01-06")
-    for h, f in frames.items():
-        base = f[["y", "pred"]].copy()
-        seoul = E.region_sets(base.index.get_level_values("region").unique())["서울 28"]
-        groups = {k: v for k, v in E.region_sets(base.index.get_level_values("region").unique()).items() if v}
-        fixed_cfgs = [c for c in BIAS_CANDIDATES if not c.is_none]
-        results = {}
-        for cfg in fixed_cfgs:
-            corrected, per_origin = median_bias_correction(base, dates, h, cfg, seoul)
-            if cfg.scope == "global" and not (~np.asarray(base.index.get_level_values("region").isin(seoul))).any():
-                continue  # no outside-Seoul residuals at 13/26 weeks: a 'global' median would just be a Seoul median
-            both = base.assign(cand=corrected["pred"])
-            res = E.compare(both.rename(columns={"pred": "base"}), "base", "cand", h, groups, args.n_boot)
-            results[cfg.name] = (res, per_origin)
-        selected, table = walk_forward_select(base, dates, h, seoul)
-        table.to_csv(out / f"selection_history_h{h}.csv", index=False, float_format="%.4f")
-        ext = base.index.get_level_values("date") >= external_start
-        both = base[ext].assign(cand=selected.loc[ext, "pred"])
-        res = E.compare(both.rename(columns={"pred": "base"}), "base", "cand", h, groups, args.n_boot)
-        results["A_selected (walk-forward, external 2020+)"] = (res, pd.Series(dtype=float))
-        for name, (res, per_origin) in results.items():
-            per_cand.setdefault(name, {})[h] = res
-            g = res["groups"]["서울 28"]
-            rows.append({"candidate": name, "horizon": h, "n_rows": g["n"], "MAE_base": g["base"]["MAE_log_pp"], "MAE_cand": g["cand"]["MAE_log_pp"], "rel_pct": g["rel_MAE_pct"],
-                         "bias_base": g["base"]["bias_pred_minus_actual_pp"], "bias_cand": g["cand"]["bias_pred_minus_actual_pp"],
-                         "p_abs_two_sided": g["hac_abs"]["p_two_sided"], "p_sq_two_sided": g["hac_sq"]["p_two_sided"],
-                         "boot90_rel_lo": g["boot_abs"]["rel_lo_pct"], "boot90_rel_hi": g["boot_abs"]["rel_hi_pct"], "RMSE_base": g["base"]["RMSE_log_pp"], "RMSE_cand": g["cand"]["RMSE_log_pp"],
-                         "outside_rel_pct": res["groups"].get("서울 외", {}).get("rel_MAE_pct", np.nan), "all_rel_pct": res["groups"].get("전체", {}).get("rel_MAE_pct", np.nan)})
-            log.record(name, "A", {"horizon": h}, [h], {"rel_MAE_seoul28_pct": g["rel_MAE_pct"], "p_abs": g["hac_abs"]["p_two_sided"]}, None, "frozen predictions")
-    table = pd.DataFrame(rows)
+    table, verdicts = candidate_A_report(frames, dates, out, log, args.n_boot)
     table.to_csv(out / "candidate_A_summary.csv", index=False, float_format="%.4f")
     print("\n== candidate A: Seoul-28 MAE (log-return pp), relative change vs baseline, HAC p (abs-error), 90% block-bootstrap CI (relative %)")
     print(table.round(3).to_string(index=False))
-    verdicts = {}
-    for name, per_h in per_cand.items():
-        primary = {h: r for h, r in per_h.items() if h in E.PRIMARY_HORIZONS}
-        d = E.decide(primary, outside_unchanged_by_design=name.startswith("seoul") or name.startswith("A_selected"))
-        verdicts[name] = {**d, "score_13_26_52": d["score"], "horizons_available": sorted(per_h)}
     (out / "candidate_A_verdicts.json").write_text(json.dumps(verdicts, ensure_ascii=False, indent=2, default=float), encoding="utf-8")
     print("\n== verdicts (pre-set rule)")
     for name, v in verdicts.items():

@@ -5,7 +5,6 @@
     "reasons": [
       "Seoul-28 mean relative MAE change is not negative"
     ],
-    "score_13_26_52": 0.8396450478342329,
     "horizons_available": [
       13,
       26,
@@ -20,7 +19,6 @@
     "reasons": [
       "Seoul-28 mean relative MAE change is not negative"
     ],
-    "score_13_26_52": 2.189408079560873,
     "horizons_available": [
       13,
       26,
@@ -35,7 +33,6 @@
     "reasons": [
       "Seoul-28 mean relative MAE change is not negative"
     ],
-    "score_13_26_52": 0.7723960803004933,
     "horizons_available": [
       13,
       26,
@@ -50,7 +47,6 @@
     "reasons": [
       "Seoul-28 mean relative MAE change is not negative"
     ],
-    "score_13_26_52": 1.748056744210591,
     "horizons_available": [
       13,
       26,
@@ -66,7 +62,6 @@
       "missing primary horizons [13, 26]",
       "Seoul-28 mean relative MAE change is not negative"
     ],
-    "score_13_26_52": 3.280442458432087,
     "horizons_available": [
       52,
       78,
@@ -80,7 +75,6 @@
       "missing primary horizons [13, 26]",
       "Seoul-28 mean relative MAE change is not negative"
     ],
-    "score_13_26_52": 7.091110692425429,
     "horizons_available": [
       52,
       78,
