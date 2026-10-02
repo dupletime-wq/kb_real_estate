@@ -1,0 +1,90 @@
+{
+  "seoul_x0.5": {
+    "verdict": "기각",
+    "score": 0.8396450478342329,
+    "reasons": [
+      "Seoul-28 mean relative MAE change is not negative"
+    ],
+    "score_13_26_52": 0.8396450478342329,
+    "horizons_available": [
+      13,
+      26,
+      52,
+      78,
+      104
+    ]
+  },
+  "seoul_x1.0": {
+    "verdict": "기각",
+    "score": 2.189408079560873,
+    "reasons": [
+      "Seoul-28 mean relative MAE change is not negative"
+    ],
+    "score_13_26_52": 2.189408079560873,
+    "horizons_available": [
+      13,
+      26,
+      52,
+      78,
+      104
+    ]
+  },
+  "seoul_recent156_x0.5": {
+    "verdict": "기각",
+    "score": 0.7723960803004933,
+    "reasons": [
+      "Seoul-28 mean relative MAE change is not negative"
+    ],
+    "score_13_26_52": 0.7723960803004933,
+    "horizons_available": [
+      13,
+      26,
+      52,
+      78,
+      104
+    ]
+  },
+  "A_selected (walk-forward, external 2020+)": {
+    "verdict": "기각",
+    "score": 1.748056744210591,
+    "reasons": [
+      "Seoul-28 mean relative MAE change is not negative"
+    ],
+    "score_13_26_52": 1.748056744210591,
+    "horizons_available": [
+      13,
+      26,
+      52,
+      78,
+      104
+    ]
+  },
+  "global_x0.5": {
+    "verdict": "기각",
+    "score": 3.280442458432087,
+    "reasons": [
+      "missing primary horizons [13, 26]",
+      "Seoul-28 mean relative MAE change is not negative"
+    ],
+    "score_13_26_52": 3.280442458432087,
+    "horizons_available": [
+      52,
+      78,
+      104
+    ]
+  },
+  "global_x1.0": {
+    "verdict": "기각",
+    "score": 7.091110692425429,
+    "reasons": [
+      "missing primary horizons [13, 26]",
+      "Seoul-28 mean relative MAE change is not negative"
+    ],
+    "score_13_26_52": 7.091110692425429,
+    "horizons_available": [
+      52,
+      78,
+      104
+    ]
+  }
+}
