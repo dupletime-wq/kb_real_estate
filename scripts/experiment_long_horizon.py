@@ -49,16 +49,23 @@ def main() -> None:
     parser.add_argument("--out-dir", type=Path)
     parser.add_argument("--reproduction-cut", default="2026-08-24", help="cut the workbook here to reproduce the frozen baseline (its last week); '' skips the check")
     parser.add_argument("--min-train-rows", type=int, default=5000)
+    parser.add_argument("--candidates", default=",".join(CANDIDATES), help="named variants to test (default: the five pre-specified long-horizon candidates)")
+    parser.add_argument("--primary", default="52,104,208", help="horizons that decide (e.g. 104,208 for a quick ridge-only ablation)")
+    parser.add_argument("--extra", default="78", help="horizons reported next to them")
+    parser.add_argument("--tag", default="", help="suffix of the output directory (e.g. ablation)")
     parser.add_argument("--accept-reproduction-differences", action="store_true")
     args = parser.parse_args()
 
     kb = parse_kb_panel(args.workbook.read_bytes())
-    cfg = RunConfig(n_boot=args.n_boot, min_train_rows=args.min_train_rows, primary=LONG, extra=(78,))
-    out = args.out_dir or Path("experiments") / f"long_horizon_{kb.fingerprint[:10]}_{kb.last_date:%Y%m%d}"
+    primary = tuple(int(x) for x in args.primary.split(",") if x)
+    extra = tuple(int(x) for x in args.extra.split(",") if x)
+    chosen = tuple(x for x in args.candidates.split(",") if x)
+    cfg = RunConfig(n_boot=args.n_boot, min_train_rows=args.min_train_rows, primary=primary, extra=extra)
+    out = args.out_dir or Path("experiments") / (f"long_horizon_{kb.fingerprint[:10]}_{kb.last_date:%Y%m%d}" + (f"_{args.tag}" if args.tag else ""))
     out.mkdir(parents=True, exist_ok=True)
     log = E.ExperimentLog(Path("experiments/log.jsonl"))
     meta = {"workbook_sha256": kb.fingerprint, "last_date": str(kb.last_date.date()), "git_commit": git_commit(Path(__file__).resolve().parents[1]), "versions": library_versions(),
-            "primary_horizons": list(LONG), "extra_horizons": [78], "refit_every": cfg.refit_every, "labels": "observed-only" if kb.observed is not None else "filled values allowed", "candidates": list(CANDIDATES), "evidence": E.EVIDENCE_LEVEL}
+            "primary_horizons": list(primary), "extra_horizons": list(extra), "refit_every": cfg.refit_every, "labels": "observed-only" if kb.observed is not None else "filled values allowed", "candidates": list(chosen), "evidence": E.EVIDENCE_LEVEL}
     (out / "run_metadata.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
 
     # 1. reproduce the long-horizon baseline before anything else
@@ -81,15 +88,15 @@ def main() -> None:
             sys.exit(f"STOP: the long-horizon baseline does not reproduce ({rep['verdict']}); see {out}/baseline_reproduction.csv")
 
     # 2. context: model vs pooled historical mean vs no change on identical rows
-    ctx = naive_context(kb, cfg, (52, 78, 104, 208))
+    ctx = naive_context(kb, cfg, tuple(sorted(set(primary) | set(extra))))
     ctx.to_csv(out / "context_model_vs_naive.csv", index=False, float_format="%.4f")
     print("\n== the baseline model against naive forecasts (identical rows; MAE in log-return percentage points)")
     print(ctx[ctx["group"].isin(["서울 28", "서울시 지수", "서울 25개 구", "서울 외", "전체"])][["horizon", "group", "n", "MAE_model", "MAE_pooled_mean", "MAE_no_change", "model_vs_pooled_mean_pct", "bias_model", "bias_pooled_mean"]].round(2).to_string(index=False))
 
     # 3. candidates
-    variants = [NAMED_VARIANTS[n] for n in CANDIDATES]
+    variants = [NAMED_VARIANTS[n] for n in chosen]
     result = run_feature_experiments(kb, cfg, variants, out, log)
-    print(f"\n== 1. EXPLORATORY scorecard (52/104/208 decide, 78 reported; same rows choose and grade)\n   {result['multiple_testing']}")
+    print(f"\n== 1. EXPLORATORY scorecard ({'/'.join(map(str, primary))} decide, {'/'.join(map(str, extra))} reported; same rows choose and grade)\n   {result['multiple_testing']}")
     sc = result["scorecard"]
     wanted = ["candidate", "horizon", "n", "MAE_base", "MAE_cand", "rel_pct", "rel_2014-2019", "rel_2020-2021", "rel_2022-2023", "rel_2024+", "p_raw", "p_bonferroni_logged", "p_holm_this_table", "boot90_rel_lo", "boot90_rel_hi"]
     show = sc[(sc["group"] == "서울 28") & (~sc["candidate"].str.contains("Ridge only"))][[c for c in wanted if c in sc.columns]]

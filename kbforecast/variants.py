@@ -51,5 +51,8 @@ NAMED_VARIANTS: dict[str, EngineVariant] = {
     "R_group_alpha": EngineVariant("R_group_alpha", ridge_mode="group_alpha_cv"),
     "L_longmem": EngineVariant("L_longmem", ("r104", "pdev156", "pdev260")),
     "L_valuation": EngineVariant("L_valuation", ("sj_level", "sj_dev156", "sj_z156")),
+    # post-hoc ablation of L_valuation (added after its result was seen; counted in the experiment log)
+    "J_level": EngineVariant("J_level", ("sj_level",)),
+    "J_dev": EngineVariant("J_dev", ("sj_dev156", "sj_z156")),
     "L_all": EngineVariant("L_all", ("r104", "pdev156", "pdev260", "sj_level", "sj_dev156", "sj_z156")),
 }
