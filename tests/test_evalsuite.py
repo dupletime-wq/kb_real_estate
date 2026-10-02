@@ -89,9 +89,24 @@ def test_decision_rule_is_fixed_and_conservative():
     assert E.decide({13: _per_h(-3.0)})["verdict"] != "채택"  # missing horizons never adopt
 
 
-def test_experiment_log_counts_every_candidate(tmp_path):
+def test_experiment_log_counts_candidates_and_tests_and_annotates_p_values(tmp_path):
     log = E.ExperimentLog(tmp_path / "log.jsonl")
     for i in range(4):
         log.record(f"c{i}", "A", {"k": i}, [13], {"score": -0.1 * i})
-    log.record("c1", "A", {"k": 1}, [26], {})  # same candidate on another horizon is not a new candidate
-    assert log.n_candidates() == 4 and np.isclose(log.adjusted_p(0.02), 0.08)
+    log.record("c1", "A", {"k": 1}, [26], {})  # same candidate on another horizon: not a new candidate, but a new test
+    log.record("c1", "A", {"k": 1}, [104], {})  # a non-primary horizon never counts as a test
+    log.record("overlay", "reference", {}, [52], {})  # reference comparisons are not tries
+    assert log.n_candidates() == 4 and log.n_tests() == 5 and log.families() == {"A": 4}
+    assert np.isclose(log.adjusted_p(0.02), 0.10) and log.adjusted_p(0.02, include_prior=True) == 1.0
+    table = pd.DataFrame({"candidate": list("abc"), "p_abs": [0.01, 0.20, np.nan]})
+    out = log.annotate(table)
+    assert np.isclose(out.loc[0, "p_bonferroni_logged"], 0.05) and out.loc[1, "p_bonferroni_logged"] == 1.0 and out["p_raw"].tolist()[:2] == [0.01, 0.20]
+    assert np.isclose(out.loc[0, "p_holm_this_table"], 0.02) and np.isclose(out.loc[1, "p_holm_this_table"], 0.20) and np.isnan(out.loc[2, "p_holm_this_table"])
+    assert (out["n_candidates_logged"] == 4).all() and (out["evidence"] == "exploratory").all() and "earlier README candidates" in log.summary_text()
+
+
+def test_verdict_marks_evidence_and_names_the_horizons_behind_the_score():
+    only52 = {52: _per_h(+3.28)}
+    d = E.decide(only52)
+    assert d["score_horizons"] == [52] and d["verdict"] == "기각" and any("missing" in r and "not a 13/26/52-week average" in r for r in d["reasons"])
+    assert "탐색적" in d["evidence"] and E.decide({h: _per_h(-3.0) for h in E.PRIMARY_HORIZONS})["score_horizons"] == [13, 26, 52]

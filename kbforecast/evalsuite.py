@@ -28,11 +28,16 @@ from .trades import SEOUL_GROUPS, SEOUL_GU_CODES
 PRIMARY_HORIZONS = (13, 26, 52)
 EXTRA_HORIZONS = (78, 104)
 EVAL_STEP = 2
+EVIDENCE_LEVEL = (
+    "탐색적: 같은 과거 자료로 이미 여러 번 탐색된 비교이며 다중검정 미보정 구간으로 내린 판정입니다. 운영 기본값은 자동으로 바뀌지 않습니다 "
+    "(최종 확인은 전향 기록)."
+)
 # --- pre-set decision rule (fixed before any candidate is run; see `decide`) ---
 ADOPT_MAX_SCORE = -1.0  # mean over 13/26/52w of the Seoul-28 relative MAE change (%), must be at most this
 OUTSIDE_SEOUL_MAX = 0.5  # relative MAE change (%) outside Seoul may not exceed this at any of 13/26/52w
 PERIOD_MAX = 2.0  # no period may worsen the Seoul-28 MAE by more than this (% , averaged over 13/26/52w)
-BOOT_LEVEL = 0.90  # bootstrap interval level; the upper end must be below 0 at >= 2 of the 3 horizons
+BOOT_LEVEL = 0.90
+PRIOR_UNLOGGED_CANDIDATES = 20  # README: about 20-25 candidates were tried before the experiment log existed; their p-values are not recorded  # bootstrap interval level; the upper end must be below 0 at >= 2 of the 3 horizons
 
 
 def region_sets(regions: Iterable[str]) -> dict[str, set[str]]:
@@ -199,10 +204,16 @@ def compare(frame: pd.DataFrame, base: str, cand: str, horizon: int, groups: dic
     return out
 
 
+def selection_horizons(per_horizon: dict[int, dict]) -> list[int]:
+    """The primary horizons for which a Seoul-28 comparison exists."""
+    return [h for h in PRIMARY_HORIZONS if h in per_horizon and "서울 28" in per_horizon[h]["groups"]]
+
+
 def selection_score(per_horizon: dict[int, dict]) -> float:
     """Pre-set primary criterion: mean over 13/26/52w of the Seoul-28 relative MAE change (%). Each horizon counts equally, so the
-    larger errors of longer horizons cannot dominate."""
-    vals = [per_horizon[h]["groups"]["서울 28"]["rel_MAE_pct"] for h in PRIMARY_HORIZONS if h in per_horizon and "서울 28" in per_horizon[h]["groups"]]
+    larger errors of longer horizons cannot dominate. If a primary horizon is missing the mean covers only the horizons that exist
+    (see `selection_horizons`) and the verdict can never be 채택: such a number must not be described as a 13/26/52-week average."""
+    vals = [per_horizon[h]["groups"]["서울 28"]["rel_MAE_pct"] for h in selection_horizons(per_horizon)]
     return float(np.mean(vals)) if vals else float("nan")
 
 
@@ -211,11 +222,12 @@ def decide(per_horizon: dict[int, dict], outside_unchanged_by_design: bool = Fal
     check fails; 기각 (reject) if the score is not negative. Missing horizons make the verdict 보류 at best."""
     reasons: list[str] = []
     score = selection_score(per_horizon)
-    have = [h for h in PRIMARY_HORIZONS if h in per_horizon and "서울 28" in per_horizon[h]["groups"]]
+    have = selection_horizons(per_horizon)
+    base = {"score": score, "score_horizons": have, "evidence": EVIDENCE_LEVEL}
     if len(have) < len(PRIMARY_HORIZONS):
-        reasons.append(f"missing primary horizons {sorted(set(PRIMARY_HORIZONS) - set(have))}")
+        reasons.append(f"score covers only {have}; primary horizons {sorted(set(PRIMARY_HORIZONS) - set(have))} are missing, so it is not a 13/26/52-week average")
     if not np.isfinite(score) or score >= 0:
-        return {"verdict": "기각", "score": score, "reasons": reasons + ["Seoul-28 mean relative MAE change is not negative"]}
+        return {"verdict": "기각", **base, "reasons": reasons + ["Seoul-28 mean relative MAE change is not negative"]}
     ok = True
     if score > ADOPT_MAX_SCORE:
         ok = False
@@ -240,7 +252,7 @@ def decide(per_horizon: dict[int, dict], outside_unchanged_by_design: bool = Fal
         reasons.append(f"bootstrap {int(BOOT_LEVEL * 100)}% interval excludes zero at only {n_sig} of {len(have)} horizons")
     if len(have) < len(PRIMARY_HORIZONS):
         ok = False
-    return {"verdict": "채택" if ok else "보류", "score": score, "reasons": reasons}
+    return {"verdict": "채택" if ok else "보류", **base, "reasons": reasons}
 
 
 # ----------------------------------------------------------------------------- experiment registry
@@ -268,6 +280,57 @@ class ExperimentLog:
         """Distinct candidates tried (family 'reference' entries are comparisons of existing settings, not new tries)."""
         return len({(e["family"], e["candidate"]) for e in self.entries() if e["family"] != "reference"})
 
-    def adjusted_p(self, p: float) -> float:
-        """Bonferroni adjustment over every candidate recorded so far (conservative; reported next to the raw p, never instead of it)."""
-        return float(min(1.0, p * max(self.n_candidates(), 1)))
+    def n_tests(self, horizons: tuple[int, ...] = PRIMARY_HORIZONS) -> int:
+        """Distinct (family, candidate, horizon) comparisons at the primary horizons that are in this log (reference comparisons excluded)."""
+        seen = set()
+        for e in self.entries():
+            if e["family"] == "reference":
+                continue
+            for h in e["horizons"]:
+                if h in horizons:
+                    seen.add((e["family"], e["candidate"], h))
+        return len(seen)
+
+    def families(self) -> dict[str, int]:
+        out: dict[str, set] = {}
+        for e in self.entries():
+            if e["family"] != "reference":
+                out.setdefault(e["family"], set()).add(e["candidate"])
+        return {k: len(v) for k, v in sorted(out.items())}
+
+    def adjusted_p(self, p: float, include_prior: bool = False) -> float:
+        """Bonferroni p over every logged primary-horizon comparison (conservative). Reported next to the raw p, never instead of it.
+
+        The log only knows what was recorded through it. Roughly `PRIOR_UNLOGGED_CANDIDATES` earlier candidates (README) were explored
+        without a log; `include_prior=True` adds that many candidates x 3 horizons as an ASSUMED lower bound on the unlogged tries.
+        """
+        n = max(self.n_tests(), 1) + (PRIOR_UNLOGGED_CANDIDATES * len(PRIMARY_HORIZONS) if include_prior else 0)
+        return float(min(1.0, p * n))
+
+    def annotate(self, table: pd.DataFrame, p_col: str = "p_abs") -> pd.DataFrame:
+        """Add the multiplicity columns to a result table: raw p, Bonferroni p (logged tests), Bonferroni p with the assumed prior tries,
+        Holm p within this table's tests, and the counts the adjustments are based on."""
+        out = table.copy()
+        n_logged, n_cand = max(self.n_tests(), 1), self.n_candidates()
+        out["n_candidates_logged"] = n_cand
+        out["n_tests_logged"] = n_logged
+        out["p_raw"] = out[p_col]
+        out["p_bonferroni_logged"] = (out[p_col] * n_logged).clip(upper=1.0)
+        out["p_bonferroni_with_prior_assumed"] = (out[p_col] * (n_logged + PRIOR_UNLOGGED_CANDIDATES * len(PRIMARY_HORIZONS))).clip(upper=1.0)
+        order = out[p_col].rank(method="first", na_option="bottom").astype("Int64").fillna(len(out) + 1)
+        m = int(out[p_col].notna().sum())
+        holm = pd.Series(np.nan, index=out.index)
+        running = 0.0
+        for rank_pos, idx in enumerate(out[p_col].sort_values().index, start=1):
+            if not np.isfinite(out.at[idx, p_col]):
+                continue
+            running = max(running, min(1.0, (m - rank_pos + 1) * out.at[idx, p_col]))
+            holm.at[idx] = running
+        out["p_holm_this_table"] = holm
+        out["evidence"] = "exploratory"
+        return out
+
+    def summary_text(self) -> str:
+        fam = ", ".join(f"{k}:{v}" for k, v in self.families().items())
+        return (f"logged candidates {self.n_candidates()} ({fam}); logged primary-horizon comparisons {self.n_tests()}; "
+                f"plus ~{PRIOR_UNLOGGED_CANDIDATES} earlier README candidates that were explored without this log (assumed lower bound)")

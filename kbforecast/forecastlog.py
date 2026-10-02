@@ -12,7 +12,7 @@ before this scheme (`<origin>_<data id>.csv`) are kept as they are and load as c
 The configuration id covers everything that determines the forecast apart from the data: features, HGB settings and early-stopping mode,
 blend weights, preprocessing, labels, overlay and bias-correction settings, interval levels (never the data-dependent overlay values).
 `score_log` scores matured rows against prices that were actually observed, either with today's values of the index (`latest`) or with the
-value each week was FIRST seen at (`first`, from the append-only archive `realized_first.csv`; the origin price is the logged one).
+value each week was FIRST SEEN at by this system (`first_seen`, append-only archive `realized_first_seen.csv`, with the collection lag and a late-collection flag; the origin price is the logged one). A value is only called a first PUBLICATION value (`first_published`) if its vintage was verified separately (`vintage_verified.csv`).
 `pair_models` joins two configurations on the same origin / region / horizon / data vintage so they are compared on identical rows.
 """
 from __future__ import annotations
@@ -182,10 +182,20 @@ def load_log(log_dir: Path) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=["log_file", "data_id", "config_id", "variant", *LOG_COLUMNS])
 
 
-# ----------------------------------------------------------------------------- realised values: first release vs latest
-def record_realized_first(kb: KBPanel, path: Path, since: pd.Timestamp | None = None) -> int:
-    """Append, never rewrite: every actually observed (region, week) value of the sale index that is not in the archive yet, with the
-    UTC date and data id of the panel that showed it first. Returns the number of rows appended."""
+# ----------------------------------------------------------------------------- realised values: first seen, first published, latest
+LATE_COLLECTION_DAYS = 14  # a value first collected more than this many days after its week is flagged: it may already have been revised
+
+
+def record_first_seen(kb: KBPanel, path: Path, since: pd.Timestamp | None = None, today: pd.Timestamp | None = None) -> int:
+    """Append, never rewrite: every actually observed (region, week) value of the sale index that the archive has not seen yet.
+
+    This is the value THIS SYSTEM saw first, which is not necessarily the value KB first published: a workbook downloaded weeks later (or a
+    first run that back-fills older weeks) may already contain revisions. Each row therefore carries `first_seen_utc`, the data id,
+    the newest week of the panel at that time, `collection_lag_days` (first seen minus the week's date) and `late_collection`
+    (lag above `LATE_COLLECTION_DAYS`), and the archive has a sidecar `<name>.meta.json` with its creation time. A value is called a first
+    PUBLICATION value only if its vintage was confirmed separately (`verify_vintage`); nothing is promoted automatically.
+    Returns the number of rows appended.
+    """
     price = kb.sale
     seen = kb.observed["sale"] if kb.observed is not None else price.notna()
     long = price.where(seen).stack().rename("value").reset_index()
@@ -201,40 +211,75 @@ def record_realized_first(kb: KBPanel, path: Path, since: pd.Timestamp | None = 
         old = None
     if long.empty:
         return 0
-    long = long.assign(first_seen_utc=datetime.now(timezone.utc).strftime("%Y-%m-%d"), data_id=data_id_of(kb))
+    now = pd.Timestamp(today) if today is not None else pd.Timestamp(datetime.now(timezone.utc).date())
+    lag = (now - long["date"]).dt.days
+    long = long.assign(
+        first_seen_utc=now.strftime("%Y-%m-%d"), data_id=data_id_of(kb), panel_last_date=str(kb.sale.index.max().date()),
+        collection_lag_days=lag.to_numpy(), late_collection=(lag > LATE_COLLECTION_DAYS).to_numpy(),
+    )
     path.parent.mkdir(parents=True, exist_ok=True)
     long.to_csv(path, mode="a", header=old is None, index=False, float_format="%.6f")
+    meta = path.with_suffix(".meta.json")
+    if not meta.exists():
+        meta.write_text(json.dumps({
+            "archive_created_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "meaning": "first_seen = first value this system saw; NOT necessarily the first published value",
+            "late_collection_days": LATE_COLLECTION_DAYS,
+            "first_batch_rows": int(len(long)), "first_batch_late_rows": int(long["late_collection"].sum()),
+            "note": "rows of the first batch are mostly late (back-filled); use first_published only for vintages verified via verify_vintage",
+        }, ensure_ascii=False, indent=2), encoding="utf-8")
     return int(len(long))
 
 
-def score_log(log: pd.DataFrame, kb: KBPanel, realized: str = "latest", first_path: Path | None = None) -> pd.DataFrame:
+def verify_vintage(path: Path, region: str, dates: list, evidence: str, verified_by: str) -> int:
+    """Append-only record that the archived first-seen value of these weeks is the first PUBLISHED one (e.g. collected the day it appeared,
+    or matched against a dated copy of KB's release). `evidence` must say how; the archive itself is not modified."""
+    rows = pd.DataFrame({"region": region, "date": pd.to_datetime(dates), "evidence": evidence, "verified_by": verified_by, "verified_at_utc": datetime.now(timezone.utc).isoformat(timespec="seconds")})
+    path = Path(path)
+    rows.to_csv(path, mode="a", header=not path.exists(), index=False)
+    return int(len(rows))
+
+
+def score_log(log: pd.DataFrame, kb: KBPanel, realized: str = "latest", first_seen_path: Path | None = None, verified_path: Path | None = None) -> pd.DataFrame:
     """Attach realised returns to logged forecasts whose target week has arrived; only actually observed prices count.
 
-    `y_latest`: today's values of the index at the origin and the target week (needs a real observation at both). `y_first`: the logged
-    origin price against the value the target week was first seen at (archive `realized_first.csv`; NaN where either is missing, e.g. for
-    records written before `origin_price` existed). `y` is the one chosen by `realized` ('latest' or 'first'). Errors are cumulative log-return differences.
+    `y_latest`: today's values of the index at the origin and the target week (a real observation at both). `y_first_seen`: the logged
+    origin price against the value the target week was first SEEN at (archive `realized_first_seen.csv`; NaN where either is missing, e.g. for
+    records written before `origin_price` existed). `y_first_published`: the same, but only for target weeks whose vintage was verified
+    (`vintage_verified.csv`, see `verify_vintage`). `late_target_collection` tells whether the target value was first seen late. `y` is the
+    one chosen by `realized` ('latest', 'first_seen' or 'first_published'). Errors are cumulative log-return differences.
     """
-    if realized not in ("latest", "first"):
+    if realized not in ("latest", "first_seen", "first_published"):
         raise ValueError(realized)
     if log.empty:
-        return log.assign(target_date=pd.NaT, y=np.nan, y_latest=np.nan, y_first=np.nan)
+        return log.assign(target_date=pd.NaT, y=np.nan, y_latest=np.nan, y_first_seen=np.nan, y_first_published=np.nan, late_target_collection=np.nan)
     price = np.log(kb.sale)
     seen = kb.observed["sale"] if kb.observed is not None else kb.sale.notna()
     out = log.copy()
     out["target_date"] = out["origin"] + pd.to_timedelta(out["horizon"] * 7, unit="D")
     first = None
-    if first_path is not None and Path(first_path).exists():
-        arch = pd.read_csv(first_path, parse_dates=["date"])
-        first = arch.set_index(["region", "date"])["value"]
+    if first_seen_path is not None and Path(first_seen_path).exists():
+        arch = pd.read_csv(first_seen_path, parse_dates=["date"])
+        first = arch.set_index(["region", "date"])[["value", "late_collection"]]
+    verified: set = set()
+    if verified_path is not None and Path(verified_path).exists():
+        v = pd.read_csv(verified_path, parse_dates=["date"])
+        verified = set(zip(v["region"], v["date"]))
     y_latest = np.full(len(out), np.nan)
-    y_first = np.full(len(out), np.nan)
+    y_seen = np.full(len(out), np.nan)
+    y_pub = np.full(len(out), np.nan)
+    late = np.full(len(out), np.nan)
     for i, row in enumerate(out.itertuples()):
         if row.region in price.columns and row.target_date in price.index and row.origin in price.index and seen.at[row.origin, row.region] and seen.at[row.target_date, row.region]:
             y_latest[i] = price.at[row.target_date, row.region] - price.at[row.origin, row.region]
-        if first is not None and np.isfinite(row.origin_price) and (row.region, row.target_date) in first.index:
-            y_first[i] = np.log(first.loc[(row.region, row.target_date)]) - np.log(row.origin_price)
-    out["y_latest"], out["y_first"] = y_latest, y_first
-    out["y"] = out["y_latest"] if realized == "latest" else out["y_first"]
+        key = (row.region, row.target_date)
+        if first is not None and np.isfinite(row.origin_price) and key in first.index:
+            y_seen[i] = np.log(first.loc[key, "value"]) - np.log(row.origin_price)
+            late[i] = float(first.loc[key, "late_collection"])
+            if key in verified:
+                y_pub[i] = y_seen[i]
+    out["y_latest"], out["y_first_seen"], out["y_first_published"], out["late_target_collection"] = y_latest, y_seen, y_pub, late
+    out["y"] = out[{"latest": "y_latest", "first_seen": "y_first_seen", "first_published": "y_first_published"}[realized]]
     return out
 
 
@@ -249,7 +294,7 @@ def pair_models(scored: pd.DataFrame, base: str, cand: str) -> pd.DataFrame:
     keys = ["origin", "region", "horizon", "data_id"]
     a, b = pick(base), pick(cand)
     cols = ["pred", "lo", "hi", "pred_raw"]
-    merged = a[keys + ["y", "y_latest", "y_first", *cols]].merge(b[keys + cols], on=keys, suffixes=("_base", "_cand"))
+    merged = a[keys + ["y", "y_latest", "y_first_seen", "y_first_published", *cols]].merge(b[keys + cols], on=keys, suffixes=("_base", "_cand"))
     return merged
 
 

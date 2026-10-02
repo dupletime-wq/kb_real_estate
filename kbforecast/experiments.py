@@ -91,6 +91,8 @@ def candidate_A_report(frames: dict[int, pd.DataFrame], dates: pd.DatetimeIndex,
         both = base[ext].rename(columns={"pred": "base"}).assign(cand=selected.loc[ext, "pred"])
         results["A_selected (walk-forward, external 2020+)"] = E.compare(both, "base", "cand", h, groups, n_boot)
         for name, res in results.items():
+            if "서울 28" not in res["groups"]:  # e.g. the external window has no rows at this horizon: nothing to report, nothing invented
+                continue
             per_cand.setdefault(name, {})[h] = res
             g = res["groups"]["서울 28"]
             rows.append({
@@ -162,14 +164,24 @@ def _common_rows(frames: dict[str, pd.DataFrame]) -> pd.DataFrame:
 
 def run_feature_experiments(
     kb: KBPanel, cfg: RunConfig, variants: list[EngineVariant], out: Path, log: E.ExperimentLog, volume_history: pd.DataFrame | None = None,
-    rate=None, cd=None, with_ridge_check: bool = True, combine: bool = True, train_start: pd.Timestamp | None = None,
+    rate=None, cd=None, with_ridge_check: bool = True, train_start: pd.Timestamp | None = None, windows=None, min_internal_rows: int | None = None,
 ) -> dict:
-    """Baseline vs each variant at the primary horizons (decision) and at the extra horizons (reported separately).
+    """Two separate products, never to be confused.
 
-    `train_start` removes the labels of earlier origins for baseline AND candidates alike (e.g. the first date a new data source
-    exists), so a short new series cannot make the candidate look better only because the baseline had more or other history.
+    1. A scorecard of every candidate against the baseline over the whole evaluation period at the primary horizons (13/26/52 weeks decide,
+       78/104 reported). It is EXPLORATORY: the same rows choose and grade, the historical years were already used by earlier experiments,
+       and the 90% bootstrap interval is not corrected for the number of candidates tried (raw and multiplicity-adjusted p-values are printed
+       side by side). Its verdicts never change the production model.
+    2. An external validation of the SELECTION PROCEDURE (kbforecast/selection.py): for each external window the candidate or combination is
+       chosen on origins whose labels had closed before the window, frozen, and graded on the window; combinations are only formed from
+       candidates that passed in that selection period.
+
+    `train_start` removes the labels of earlier origins for baseline AND candidates alike (e.g. the first date a new data source exists).
     """
+    from . import selection as S
+
     out.mkdir(parents=True, exist_ok=True)
+    windows = windows or S.EXTERNAL_WINDOWS
     fs = build_features(kb)
     cols = model_columns(fs)
     dates = fs.log_price.index
@@ -185,6 +197,7 @@ def run_feature_experiments(
     saved: list[pd.DataFrame] = []
     horizons = list(cfg.primary) + list(cfg.extra)
     hgb_log: dict[str, list] = {}
+    wides: dict[int, pd.DataFrame] = {}
     for h in horizons:
         y = targets(h)
         frames = {"baseline": variant_frame(kb, fs, cols, CURRENT, h, y, cfg, z_rate, seoul, volume_history)}
@@ -193,13 +206,13 @@ def run_feature_experiments(
             frames[v.name] = variant_frame(kb, fs, cols, v, h, y, cfg, z_rate, seoul, volume_history, hgb_record=rec)
             hgb_log.setdefault(f"{v.name}@{h}", rec)
         wide = _common_rows(frames)
+        wides[h] = wide
         for v in variants:
             res = E.compare(wide.rename(columns={"baseline": "base"}), "base", v.name, h, groups_all, cfg.n_boot)
             results.setdefault(v.name, {})[h] = res
             g = res["groups"]["서울 28"]
             log.record(v.name, v.name.split("_")[0], {"horizon": h, **v.as_dict()}, [h], {"rel_MAE_seoul28_pct": g["rel_MAE_pct"], "p_abs": g["hac_abs"]["p_two_sided"]})
-        seoul_rows = wide[wide.index.get_level_values("region").isin(E.region_sets(wide.index.get_level_values("region").unique())["서울 28"])].reset_index().assign(horizon=h)
-        saved.append(seoul_rows)
+        saved.append(wide[wide.index.get_level_values("region").isin(E.region_sets(wide.index.get_level_values("region").unique())["서울 28"])].reset_index().assign(horizon=h))
         if with_ridge_check and any(v.extra_features for v in variants):
             r_frames = {"baseline": variant_frame(kb, fs, cols, CURRENT, h, y, cfg, None, seoul, volume_history, ridge_only=True)}
             for v in variants:
@@ -208,55 +221,139 @@ def run_feature_experiments(
             rw = _common_rows(r_frames)
             for v in variants:
                 if v.extra_features:
-                    r = E.compare(rw.rename(columns={"baseline": "base"}), "base", v.name, h, groups_all, cfg.n_boot)
-                    results.setdefault(v.name + " [Ridge only]", {})[h] = r
+                    results.setdefault(v.name + " [Ridge only]", {})[h] = E.compare(rw.rename(columns={"baseline": "base"}), "base", v.name, h, groups_all, cfg.n_boot)
+
+    # ---- 1. exploratory scorecard (with the multiplicity columns attached to the printed/saved output)
     verdicts = {}
     for name, per_h in results.items():
         primary = {h: r for h, r in per_h.items() if h in cfg.primary}
         verdicts[name] = {**E.decide(primary), "extra_horizons": {h: per_h[h]["groups"]["서울 28"]["rel_MAE_pct"] for h in per_h if h in cfg.extra}}
-    passed = [name for name, v in verdicts.items() if v["verdict"] == "채택" and "[Ridge only]" not in name]
-    summary = []
+    rows = []
     for name, per_h in results.items():
         for h, r in per_h.items():
             for gname in ("서울 28", "서울시 지수", "서울 25개 구", "서울 외", "전체"):
                 g = r["groups"].get(gname)
                 if g:
-                    summary.append({"candidate": name, "horizon": h, "group": gname, "n": g["n"], "origins": g["origins"], "MAE_base": g["base"]["MAE_log_pp"], "MAE_cand": g["cand"]["MAE_log_pp"],
-                                    "MAE_simple_base": g["base"]["MAE_simple_pp"], "MAE_simple_cand": g["cand"]["MAE_simple_pp"], "rel_pct": g["rel_MAE_pct"], "RMSE_base": g["base"]["RMSE_log_pp"], "RMSE_cand": g["cand"]["RMSE_log_pp"],
-                                    "bias_base": g["base"]["bias_pred_minus_actual_pp"], "bias_cand": g["cand"]["bias_pred_minus_actual_pp"], "p_abs": g["hac_abs"]["p_two_sided"], "p_sq": g["hac_sq"]["p_two_sided"],
-                                    "boot90_rel_lo": g["boot_abs"]["rel_lo_pct"], "boot90_rel_hi": g["boot_abs"]["rel_hi_pct"],
-                                    **{f"rel_{p}": d["rel_pct"] for p, d in g["periods"].items()}})
-    pd.DataFrame(summary).to_csv(out / "candidate_summary.csv", index=False, float_format="%.4f")
+                    rows.append({"candidate": name, "horizon": h, "group": gname, "n": g["n"], "origins": g["origins"], "MAE_base": g["base"]["MAE_log_pp"], "MAE_cand": g["cand"]["MAE_log_pp"],
+                                 "MAE_simple_base": g["base"]["MAE_simple_pp"], "MAE_simple_cand": g["cand"]["MAE_simple_pp"], "rel_pct": g["rel_MAE_pct"], "RMSE_base": g["base"]["RMSE_log_pp"], "RMSE_cand": g["cand"]["RMSE_log_pp"],
+                                 "bias_base": g["base"]["bias_pred_minus_actual_pp"], "bias_cand": g["cand"]["bias_pred_minus_actual_pp"], "p_abs": g["hac_abs"]["p_two_sided"], "p_sq": g["hac_sq"]["p_two_sided"],
+                                 "boot90_rel_lo": g["boot_abs"]["rel_lo_pct"], "boot90_rel_hi": g["boot_abs"]["rel_hi_pct"], **{f"rel_{p}": d["rel_pct"] for p, d in g["periods"].items()}})
+    scorecard = log.annotate(pd.DataFrame(rows), "p_abs")
+    scorecard.to_csv(out / "candidate_scorecard_exploratory.csv", index=False, float_format="%.4f")
+    (out / "verdicts_exploratory.json").write_text(json.dumps(verdicts, ensure_ascii=False, indent=2, default=float), encoding="utf-8")
     pd.concat(saved).to_csv(out / "predictions_seoul28.csv.gz", index=False, float_format="%.5f", compression="gzip")
-    (out / "verdicts.json").write_text(json.dumps(verdicts, ensure_ascii=False, indent=2, default=float), encoding="utf-8")
     if hgb_log:
         (out / "hgb_fits.json").write_text(json.dumps(hgb_log, ensure_ascii=False, default=float), encoding="utf-8")
-    combo = None
-    if combine and len(passed) >= 2:  # only candidates that passed alone are combined, then validated again
-        feats = tuple(dict.fromkeys(f for n in passed for f in next(v for v in variants if v.name == n).extra_features))
-        hgb = next((next(v for v in variants if v.name == n).hgb_mode for n in passed if next(v for v in variants if v.name == n).hgb_mode != "auto"), "auto")
-        combo = EngineVariant("combo_" + "+".join(passed), feats, hgb)
-        per_h = {}
-        for h in horizons:
-            y = targets(h)
-            wide = _common_rows({"baseline": variant_frame(kb, fs, cols, CURRENT, h, y, cfg, z_rate, seoul, volume_history), combo.name: variant_frame(kb, fs, cols, combo, h, y, cfg, z_rate, seoul, volume_history)})
-            per_h[h] = E.compare(wide.rename(columns={"baseline": "base"}), "base", combo.name, h, groups_all, cfg.n_boot)
-            log.record(combo.name, "combo", {"horizon": h, **combo.as_dict()}, [h], {"rel_MAE_seoul28_pct": per_h[h]["groups"]["서울 28"]["rel_MAE_pct"]})
-        verdicts[combo.name] = E.decide({h: r for h, r in per_h.items() if h in cfg.primary})
-        (out / "verdicts.json").write_text(json.dumps(verdicts, ensure_ascii=False, indent=2, default=float), encoding="utf-8")
-    return {"verdicts": verdicts, "passed": passed, "combo": combo.name if combo else None, "n_candidates": log.n_candidates()}
+
+    # ---- 2. external validation of the selection procedure
+    by_name = {v.name: v for v in variants}
+    combo_cache: dict[str, tuple[str, dict[int, pd.Series]]] = {}
+
+    def combo_fn(passing: list[str]):
+        feats = tuple(dict.fromkeys(f for n in passing for f in by_name[n].extra_features))
+        hgb = next((by_name[n].hgb_mode for n in passing if by_name[n].hgb_mode != "auto"), "auto")  # `passing` is ordered best internal score first
+        combo = EngineVariant("combo_" + "+".join(sorted(passing)), feats, hgb, volume_extra_lag_weeks=max(by_name[n].volume_extra_lag_weeks for n in passing))
+        if combo.name not in combo_cache:
+            series = {}
+            for h in horizons:
+                f = variant_frame(kb, fs, cols, combo, h, targets(h), cfg, z_rate, seoul, volume_history)
+                series[h] = f["pred"]
+                g = E.compare(wides[h].assign(**{combo.name: f["pred"].reindex(wides[h].index)}).rename(columns={"baseline": "base"}), "base", combo.name, h, groups_all, cfg.n_boot)
+                log.record(combo.name, "combo", {"horizon": h, **combo.as_dict()}, [h], {"rel_MAE_seoul28_pct": g["groups"]["서울 28"]["rel_MAE_pct"], "p_abs": g["groups"]["서울 28"]["hac_abs"]["p_two_sided"]})
+            combo_cache[combo.name] = (combo.name, series)
+        return combo_cache[combo.name]
+
+    history, ext = S.run_selection(wides, "baseline", [v.name for v in variants], windows, combo_fn, cfg.primary, cfg.extra, min_internal_rows or S.MIN_INTERNAL_SEOUL_ROWS)
+    history.to_csv(out / "selection_history.csv", index=False, float_format="%.4f")
+    report = S.external_report(ext, cfg.n_boot, cfg.primary)
+    sel_rows = []
+    for h, r in report["per_horizon"].items():
+        for gname in ("서울 28", "서울시 지수", "서울 25개 구", "서울 외", "전체"):
+            g = r["groups"].get(gname)
+            if g:
+                sel_rows.append({"horizon": h, "group": gname, "n": g["n"], "origins": g["origins"], "MAE_base": g["base"]["MAE_log_pp"], "MAE_selected": g["cand"]["MAE_log_pp"], "rel_pct": g["rel_MAE_pct"],
+                                 "RMSE_base": g["base"]["RMSE_log_pp"], "RMSE_selected": g["cand"]["RMSE_log_pp"], "bias_base": g["base"]["bias_pred_minus_actual_pp"], "bias_selected": g["cand"]["bias_pred_minus_actual_pp"],
+                                 "p_abs": g["hac_abs"]["p_two_sided"], "boot90_rel_lo": g["boot_abs"]["rel_lo_pct"], "boot90_rel_hi": g["boot_abs"]["rel_hi_pct"], **{f"rel_{p}": d["rel_pct"] for p, d in g["periods"].items()}})
+    log.record("selection_procedure", "selection", {"windows": [list(w) for w in windows], "candidates": [v.name for v in variants]}, list(cfg.primary), {"score": report["decision"]["score"]})
+    sel_tbl = log.annotate(pd.DataFrame(sel_rows), "p_abs") if sel_rows else pd.DataFrame()
+    sel_tbl.to_csv(out / "selection_external_summary.csv", index=False, float_format="%.4f")
+    if ext:
+        pd.concat([f.reset_index().assign(horizon=h) for h, f in ext.items()], ignore_index=True).to_csv(out / "selection_external_predictions.csv.gz", index=False, float_format="%.5f", compression="gzip")
+    (out / "selection_verdict.json").write_text(json.dumps({**report["decision"], "share_baseline_chosen": report["share_baseline_chosen"], "multiple_testing": log.summary_text()}, ensure_ascii=False, indent=2, default=float), encoding="utf-8")
+    return {
+        "verdicts": verdicts, "passed": [n for n, v in verdicts.items() if v["verdict"] == "채택" and "[Ridge only]" not in n], "selection_history": history,
+        "selection_decision": report["decision"], "n_candidates": log.n_candidates(), "multiple_testing": log.summary_text(), "scorecard": scorecard, "selection_summary": sel_tbl,
+    }
 
 
-def reproduction_check(base_frames: dict[int, pd.DataFrame], frozen: dict[int, pd.DataFrame]) -> pd.DataFrame:
-    """Compare the Seoul-28 MAE of a fresh baseline run with the frozen artifact (library versions differ, so small gaps are expected)."""
+TOL_LABEL = 1e-5  # log-return units: stored labels have 5 decimals
+TOL_PRED_MEAN = 5e-4  # mean |final forecast difference| allowed before the reproduction is flagged (0.05 percentage points)
+TOL_MAE_REL = 0.5  # % difference of the Seoul-28 MAE allowed before the reproduction is flagged
+
+
+def reproduction_report(
+    fresh: dict[int, pd.DataFrame], frozen: dict[int, pd.DataFrame], *, fingerprint: str, frozen_fingerprint: str, fresh_columns: list[str], frozen_columns: list[str],
+    refit_every: int, frozen_refit_every: int, labels_observed: bool, frozen_labels: str, require_same_fingerprint: bool = True,
+) -> dict:
+    """Is the fresh baseline run the same experiment as the frozen artifact? Checks the identity of data, features, labels and schedule first,
+    then compares row by row on the common rows: labels (y), raw blend forecasts, final forecasts (blend + overlay) and the overlay term itself,
+    and finally the Seoul-28 / all-region MAE. Verdict: 'pass', 'warn' (identical setup, forecasts differ more than the tolerance - typically
+    library versions) or 'fail' (a different dataset, rows, labels, features or schedule). Candidate experiments must not start on 'fail' or 'warn'
+    until the cause is understood; `fresh` frames need y, pred_raw, pred, `frozen` frames y, raw, pred. With `require_same_fingerprint=False`
+    (a panel cut from a NEWER workbook) the fingerprint cannot match; identical labels on the common rows are then the evidence that the
+    history was not revised, and the check is reported as unverifiable instead of failed.
+    """
+    checks = {
+        "data_fingerprint_equal": fingerprint == frozen_fingerprint if require_same_fingerprint else None,  # None: cannot be verified (a cut of another file)
+        "feature_columns_equal": list(fresh_columns) == list(frozen_columns),
+        "refit_every_equal": int(refit_every) == int(frozen_refit_every),
+        "labels_equal": (frozen_labels == "observed") == bool(labels_observed),
+    }
     rows = []
     for h, f in frozen.items():
-        if h not in base_frames:
+        if h not in fresh:
             continue
-        sets = E.region_sets(f.index.get_level_values("region").unique())
-        idx = f.dropna(subset=["y", "pred"]).index.intersection(base_frames[h].dropna(subset=["y", "pred"]).index)
-        sel = idx[idx.get_level_values("region").isin(sets["서울 28"])]
-        a = (f.loc[sel, "pred"] - f.loc[sel, "y"]).abs().mean() * 100
-        b = (base_frames[h].loc[sel, "pred"] - base_frames[h].loc[sel, "y"]).abs().mean() * 100
-        rows.append({"horizon": h, "common_rows": int(len(sel)), "MAE_frozen": float(a), "MAE_fresh": float(b), "diff": float(b - a)})
-    return pd.DataFrame(rows)
+        n = fresh[h].rename(columns={"pred_raw": "raw"})
+        fz = f.dropna(subset=["y", "pred"])
+        nz = n.dropna(subset=["y", "pred"])
+        common = fz.index.intersection(nz.index)
+        frozen_only = fz.index.difference(nz.index)
+        fresh_only = nz.index.difference(fz.index)
+        a, b = fz.loc[common], nz.loc[common]
+        dy = (a["y"] - b["y"]).abs()
+        dp, dr = (a["pred"] - b["pred"]).abs(), (a["raw"] - b["raw"]).abs()
+        d_overlay = ((a["pred"] - a["raw"]) - (b["pred"] - b["raw"])).abs()
+        sets = E.region_sets(common.get_level_values("region").unique())
+        seoul = common.get_level_values("region").isin(sets["서울 28"])
+        def mae(frame, sel):
+            return float((frame["pred"] - frame["y"]).abs()[sel].mean() * 100) if sel.any() else float("nan")
+        row = {
+            "horizon": h, "rows_frozen": int(len(fz)), "rows_fresh": int(len(nz)), "common_rows": int(len(common)), "frozen_rows_missing_in_fresh": int(len(frozen_only)), "fresh_extra_rows": int(len(fresh_only)),
+            "y_max_abs_diff": float(dy.max()) if len(dy) else float("nan"), "y_rows_differing": int((dy > TOL_LABEL).sum()),
+            "raw_mean_abs_diff": float(dr.mean()), "raw_max_abs_diff": float(dr.max()), "raw_corr": float(np.corrcoef(a["raw"], b["raw"])[0, 1]) if len(common) > 2 else float("nan"),
+            "final_mean_abs_diff": float(dp.mean()), "final_median_abs_diff": float(dp.median()), "final_p99_abs_diff": float(dp.quantile(0.99)), "final_max_abs_diff": float(dp.max()),
+            "final_corr": float(np.corrcoef(a["pred"], b["pred"])[0, 1]) if len(common) > 2 else float("nan"), "overlay_term_max_abs_diff": float(d_overlay.max()),
+            "MAE_seoul28_frozen": mae(a, seoul), "MAE_seoul28_fresh": mae(b, seoul), "MAE_all_frozen": mae(a, np.ones(len(a), bool)), "MAE_all_fresh": mae(b, np.ones(len(b), bool)),
+        }
+        row["MAE_seoul28_rel_diff_pct"] = (row["MAE_seoul28_fresh"] / row["MAE_seoul28_frozen"] - 1) * 100 if row["MAE_seoul28_frozen"] else float("nan")
+        rows.append(row)
+    table = pd.DataFrame(rows)
+    problems = [k for k, ok in checks.items() if ok is False]
+    if len(table):
+        if (table["frozen_rows_missing_in_fresh"] > 0).any():
+            problems.append("frozen evaluation rows are missing in the fresh run")
+        if (table["y_max_abs_diff"] > TOL_LABEL).any():
+            problems.append("labels differ")
+        if (table["overlay_term_max_abs_diff"] > 1e-4).any():
+            problems.append("overlay term differs")
+    else:
+        problems.append("no common horizon")
+    warn = []
+    if len(table):
+        if (table["final_mean_abs_diff"] > TOL_PRED_MEAN).any():
+            warn.append("final forecasts differ more than the tolerance")
+        if (table["MAE_seoul28_rel_diff_pct"].abs() > TOL_MAE_REL).any():
+            warn.append("Seoul-28 MAE differs more than the tolerance")
+    verdict = "fail" if problems else ("warn" if warn else "pass")
+    return {"verdict": verdict, "checks": checks, "problems": problems, "warnings": warn, "table": table,
+            "tolerances": {"label": TOL_LABEL, "final_mean_abs_diff": TOL_PRED_MEAN, "seoul28_mae_rel_pct": TOL_MAE_REL}}

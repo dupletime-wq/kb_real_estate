@@ -1,3 +1,4 @@
+import json
 import dataclasses
 
 import numpy as np
@@ -148,13 +149,19 @@ def test_feature_experiment_runner_end_to_end_on_a_synthetic_panel(tmp_path):
     cfg = RunConfig(first_origin="2013-06-03", refit_every=52, eval_step=4, min_train_rows=3000, n_boot=100, primary=(13, 26), extra=(78,))
     variants = [NAMED_VARIANTS[n] for n in ("B_px_sent", "C_obs_age", "D_hgb_fixed", "V_chg3")]
     log = E.ExperimentLog(tmp_path / "log.jsonl")
-    out = run_feature_experiments(kb, cfg, variants, tmp_path / "run", log, history, combine=False)
+    out = run_feature_experiments(kb, cfg, variants, tmp_path / "run", log, history, windows=(("2014-01-06", "2014-12-31"), ("2015-01-05", "2016-12-31")), min_internal_rows=50)
     assert set(out["verdicts"]) >= {v.name for v in variants} | {f"{v.name} [Ridge only]" for v in variants if v.extra_features}
-    assert all(v["verdict"] in ("채택", "보류", "기각") for v in out["verdicts"].values())
-    assert (tmp_path / "run" / "candidate_summary.csv").exists() and log.n_candidates() == 4
-    summary = pd.read_csv(tmp_path / "run" / "candidate_summary.csv")
-    assert {"MAE_base", "MAE_cand", "MAE_simple_base", "RMSE_cand", "bias_cand", "p_abs", "boot90_rel_lo"} <= set(summary.columns)
+    assert all(v["verdict"] in ("채택", "보류", "기각") and "탐색적" in v["evidence"] for v in out["verdicts"].values())  # every verdict says it is exploratory
+    run = tmp_path / "run"
+    assert (run / "candidate_scorecard_exploratory.csv").exists() and (run / "selection_history.csv").exists() and (run / "selection_external_summary.csv").exists()
+    summary = pd.read_csv(run / "candidate_scorecard_exploratory.csv")
+    assert {"MAE_base", "MAE_cand", "MAE_simple_base", "RMSE_cand", "bias_cand", "p_raw", "p_bonferroni_logged", "p_bonferroni_with_prior_assumed", "p_holm_this_table", "n_candidates_logged", "n_tests_logged", "evidence"} <= set(summary.columns)
     assert set(summary["horizon"]) == {13, 26, 78}  # primary horizons decide, extra horizons are only reported
+    has_p = summary["p_raw"].notna()
+    assert (summary["n_candidates_logged"] >= 4).all() and (summary.loc[has_p, "p_bonferroni_logged"] >= summary.loc[has_p, "p_raw"]).all() and has_p.any()
+    hist = pd.read_csv(run / "selection_history.csv")
+    assert len(hist) == 2 and set(hist["chosen"]) <= {"baseline", *(v.name for v in variants)} or hist["chosen"].str.startswith("combo_").any()
+    assert "selection_procedure" in {e["candidate"] for e in log.entries()} and "탐색적" in json.loads((run / "selection_verdict.json").read_text(encoding="utf-8"))["evidence"]
 
 
 def test_data_diagnostics_reports_stale_filled_and_estimated_inputs():
@@ -209,5 +216,115 @@ def test_train_start_masks_labels_of_earlier_origins_and_the_runner_accepts_it(t
     dates = masked.index.get_level_values("date")
     assert masked[dates < start].isna().all() and masked[dates >= start].equals(y[dates >= start]) and mask_targets(y, None) is y
     cfg = RunConfig(first_origin="2013-06-03", refit_every=104, eval_step=4, min_train_rows=3000, n_boot=50, primary=(13,), extra=())
-    out = run_feature_experiments(kb, cfg, [NAMED_VARIANTS["D_hgb_fixed"]], tmp_path / "r", E.ExperimentLog(tmp_path / "log.jsonl"), None, with_ridge_check=False, combine=False, train_start=start)
+    out = run_feature_experiments(kb, cfg, [NAMED_VARIANTS["D_hgb_fixed"]], tmp_path / "r", E.ExperimentLog(tmp_path / "log.jsonl"), None, with_ridge_check=False, train_start=start, windows=(("2014-01-06", "2016-12-31"),), min_internal_rows=50)
     assert "D_hgb_fixed" in out["verdicts"]
+
+
+def _repro_frames(noise=0.0, shift_label=0.0, drop_rows=0, seed=0):
+    rng = np.random.default_rng(seed)
+    dates = pd.date_range("2014-01-06", periods=60, freq="2W-MON")
+    regions = ["서울특별시", "강남구", "부산광역시"]
+    idx = pd.MultiIndex.from_product([dates, regions], names=["date", "region"])
+    y = rng.normal(0.02, 0.03, len(idx))
+    raw = y + rng.normal(0, 0.02, len(idx))
+    overlay = np.where(idx.get_level_values("region").isin(["서울특별시", "강남구"]), -0.002, 0.0)
+    frozen = pd.DataFrame({"y": y, "raw": raw, "pred": raw + overlay}, index=idx)
+    fresh = pd.DataFrame({"y": y + shift_label, "pred_raw": raw + rng.normal(0, noise, len(idx)) if noise else raw, "pred": 0.0}, index=idx)
+    fresh["pred"] = fresh["pred_raw"] + overlay
+    if drop_rows:
+        fresh = fresh.iloc[drop_rows:]
+    return {52: frozen}, {52: fresh}
+
+
+def _repro(frozen, fresh, **over):
+    from kbforecast.experiments import reproduction_report
+
+    kw = dict(fingerprint="aa", frozen_fingerprint="aa", fresh_columns=["r1", "r4"], frozen_columns=["r1", "r4"], refit_every=26, frozen_refit_every=26, labels_observed=True, frozen_labels="observed")
+    kw.update(over)
+    return reproduction_report(fresh, frozen, **kw)
+
+
+def test_reproduction_report_passes_on_identical_runs_and_reports_actual_differences():
+    frozen, fresh = _repro_frames()
+    ok = _repro(frozen, fresh)
+    assert ok["verdict"] == "pass" and ok["table"].loc[0, "final_max_abs_diff"] == 0 and ok["table"].loc[0, "y_rows_differing"] == 0
+    frozen, fresh = _repro_frames(noise=0.004)
+    warn = _repro(frozen, fresh)
+    t = warn["table"].iloc[0]
+    assert warn["verdict"] == "warn" and t["final_mean_abs_diff"] > 5e-4 and 0.9 < t["final_corr"] < 1 and t["raw_mean_abs_diff"] > 0  # same setup, forecasts drift: not a pass
+    assert warn["problems"] == [] and warn["warnings"]
+
+
+def test_reproduction_report_fails_on_a_different_dataset_labels_rows_or_schedule():
+    frozen, fresh = _repro_frames()
+    assert _repro(frozen, fresh, fingerprint="bb")["verdict"] == "fail"
+    assert _repro(frozen, fresh, refit_every=39)["verdict"] == "fail"
+    assert _repro(frozen, fresh, labels_observed=False)["verdict"] == "fail"
+    assert _repro(frozen, fresh, fresh_columns=["r1"])["verdict"] == "fail"
+    f2, n2 = _repro_frames(shift_label=0.01)
+    r = _repro(f2, n2)
+    assert r["verdict"] == "fail" and "labels differ" in r["problems"] and r["table"].loc[0, "y_rows_differing"] > 0
+    f3, n3 = _repro_frames(drop_rows=5)
+    r3 = _repro(f3, n3)
+    assert r3["verdict"] == "fail" and r3["table"].loc[0, "frozen_rows_missing_in_fresh"] == 5
+    f4, n4 = _repro_frames()
+    n4[52]["pred"] = n4[52]["pred"] + np.where(n4[52].index.get_level_values("region") == "서울특별시", 0.01, 0.0)  # overlay applied differently
+    assert "overlay term differs" in _repro(f4, n4)["problems"]
+
+
+def test_candidate_script_runs_end_to_end_with_a_stand_in_workbook(tmp_path, monkeypatch, capsys):
+    """Runs scripts/experiment_candidates.py itself (reproduction report, HGB record, state decomposition, candidate A, family C scorecard and
+    selection validation) on a synthetic panel with the parser and the frozen artifact replaced; guards the script-level wiring, not any number."""
+    import importlib.util
+    import sys
+    from pathlib import Path
+
+    from kbforecast import selection as S
+
+    root = Path(__file__).resolve().parents[1]
+    spec = importlib.util.spec_from_file_location("experiment_candidates_script", root / "scripts" / "experiment_candidates.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    kb = make_panel(weeks=420, extra_cities=60)
+    rng = np.random.default_rng(3)
+    obs = pd.DataFrame(rng.random(kb.sale.shape) > 0.03, index=kb.sale.index, columns=kb.sale.columns)
+    kb = dataclasses.replace(kb, observed={"sale": obs, "jeonse": obs}, fingerprint="standin-workbook")
+    frozen_idx = pd.MultiIndex.from_product([pd.date_range("2014-01-06", periods=20, freq="2W-MON"), ["서울특별시", "강남구"]], names=["date", "region"])
+    frozen = pd.DataFrame({"y": 0.0, "raw": 0.0, "pred": 0.0}, index=frozen_idx)
+    meta = {"long_config": {"data_fingerprint": "some-other-workbook", "refit_every": 26, "labels": "observed"}, "long_feature_columns": ["r1"]}
+    monkeypatch.setattr(mod, "parse_kb_panel", lambda _bytes: kb)
+    monkeypatch.setattr(mod, "load_frozen_baselines", lambda: ({52: frozen}, kb.sale.index, meta))
+    monkeypatch.setattr(S, "EXTERNAL_WINDOWS", (("2015-01-05", "2015-12-31"), ("2016-01-04", "2016-12-31")))
+    monkeypatch.setattr(S, "MIN_INTERNAL_SEOUL_ROWS", 20)
+    wb = tmp_path / "wb.xlsx"
+    wb.write_bytes(b"x")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sys, "argv", ["experiment_candidates.py", str(wb), "--families", "C", "--n-boot", "40"])
+    mod.main()
+    text = capsys.readouterr().out
+    out = next((tmp_path / "experiments").glob("new_workbook_*"))  # a different workbook is stored separately
+    assert "mode: new_workbook" in text and "EXPLORATORY scorecard" in text and "EXTERNAL validation of the selection procedure" in text and "No production setting was changed" in text
+    for name in ("baseline_reproduction.json", "hgb_baseline_behaviour.json", "candidate_A_summary.csv", "candidate_scorecard_exploratory.csv", "selection_history.csv", "run_metadata.json"):
+        assert (out / name).exists(), name
+    run_meta = json.loads((out / "run_metadata.json").read_text(encoding="utf-8"))
+    assert run_meta["mode"] == "new_workbook" and "versions" in run_meta and "탐색적" in run_meta["evidence"]
+    assert json.loads((out / "baseline_reproduction.json").read_text(encoding="utf-8"))["verdict"] == "fail"  # a different dataset never counts as a reproduction
+    assert (tmp_path / "experiments" / "log.jsonl").exists()
+
+
+def test_truncated_panel_is_cut_everywhere_and_its_fingerprint_says_so():
+    from kbforecast.kb_panel import truncate_panel
+
+    kb = _kb_with_observed(weeks=300)
+    cut = kb.sale.index[200]
+    t = truncate_panel(kb, cut)
+    assert t.sale.index.max() == cut == t.jeonse.index.max() == t.observed["sale"].index.max() and all(v.index.max() <= cut for v in t.sentiment.values())
+    assert t.fingerprint != kb.fingerprint and "truncated" in t.fingerprint and len(kb.sale) == 300  # the original is untouched
+
+
+def test_reproduction_by_truncation_cannot_verify_the_fingerprint_but_still_checks_labels():
+    frozen, fresh = _repro_frames()
+    ok = _repro(frozen, fresh, fingerprint="new-file-cut", require_same_fingerprint=False)
+    assert ok["verdict"] == "pass" and ok["checks"]["data_fingerprint_equal"] is None
+    f2, n2 = _repro_frames(shift_label=0.01)  # a revised history shows up as different labels
+    assert _repro(f2, n2, fingerprint="new-file-cut", require_same_fingerprint=False)["verdict"] == "fail"
