@@ -407,3 +407,30 @@ def test_long_horizon_script_runs_end_to_end_on_a_stand_in_workbook(tmp_path, mo
     assert set(sc["horizon"]) == {52, 78, 104, 208}
     v = json.loads((out / "verdicts_exploratory.json").read_text(encoding="utf-8"))
     assert all(x["score_horizons"] in ([52, 104, 208], [52, 104], [52], [104], [104, 208], [208], [52, 208], []) for x in v.values())
+
+
+def test_fx_features_use_only_rates_up_to_the_day_before_and_are_causal(tmp_path):
+    kb = _kb_with_observed(weeks=420)
+    days = pd.date_range(kb.sale.index[0] - pd.Timedelta(days=400), kb.sale.index[-1] + pd.Timedelta(days=30), freq="D")
+    rate = pd.Series(1000.0 + np.cumsum(np.random.default_rng(1).normal(0, 3, len(days))), index=days)
+    path = tmp_path / "fx.csv"
+    pd.DataFrame({"date": days, "value": rate.to_numpy()}).to_csv(path, index=False)
+    full = C.fx_features(kb, path)
+    assert set(full) == set(C.FAMILIES["X"])
+    t = 200
+    expected = np.log(rate.loc[kb.sale.index[t] - pd.Timedelta(days=1)]) - np.log(rate.loc[kb.sale.index[t - 26] - pd.Timedelta(days=1)])
+    assert np.isclose(full["fx_r26"]["서울특별시"].iloc[t], expected)
+    # changing the rate ON or after the week's date cannot move that week's feature
+    altered = rate.copy()
+    altered.loc[kb.sale.index[t]:] *= 1.5
+    path2 = tmp_path / "fx2.csv"
+    pd.DataFrame({"date": days, "value": altered.to_numpy()}).to_csv(path2, index=False)
+    changed = C.fx_features(kb, path2)
+    for name in full:
+        pd.testing.assert_frame_equal(full[name].iloc[:t + 1], changed[name].iloc[:t + 1], obj=name)
+    # Seoul-only versions: same values for Seoul, empty elsewhere; the common versions fill every region
+    seoul = [c for c in kb.sale.columns if c in seoul_region_keys(kb.hierarchy)]
+    other = [c for c in kb.sale.columns if c not in seoul]
+    assert seoul and other
+    pd.testing.assert_frame_equal(full["fx_dev156_seoul"][seoul], full["fx_dev156"][seoul])
+    assert full["fx_dev156_seoul"][other].isna().all().all() and full["fx_dev156"][other].iloc[300:].notna().all().all()

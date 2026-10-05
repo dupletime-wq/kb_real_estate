@@ -14,6 +14,10 @@ Family L  (long memory, for 52/104/208-week forecasts; only the sale index): r10
     its trailing 156 / 260-week mean (at least 104 / 156 weeks of history).
 Family J  (valuation, needs the jeonse index): sj_level = log sale - log jeonse (minus log of the jeonse-to-sale ratio), sj_dev156 = its deviation from the
     trailing 156-week mean, sj_z156 = that deviation in units of its trailing 156-week standard deviation. Same definitions as the unused columns of features.py. sj_level_seoul = sj_level for the Seoul series only (others empty).
+Family X  (exchange rate, a market price that is never revised; one common time series, so it can only explain movements that are common to the regions
+    it is given to). Source: FRED DEXKOUS (Federal Reserve H.10, KRW per USD, NY noon buying rate; bundled snapshot data/usdkrw_fred.csv; NOT the Bank of Korea closing
+    rate, so levels differ a little). A week's value is the last observation on or before the day BEFORE the week's date (same one-day lag as the macro series).
+    fx_r26 = 26-week log change, fx_dev156 = log rate minus its trailing 156-week mean of weekly values (at least 104 weeks); *_seoul = the same for the Seoul series only.
 Family V  (monthly trading volume from MOLIT, Seoul city / two halves / 25 districts only; see trades.py for the point-in-time design)
     vol_rel36     log((latest known month + 1) / (mean of the 36 months before it + 1))
     vol_chg3      log((last 3 known months + 1) / (the 3 months before them + 1))
@@ -24,6 +28,8 @@ Family V  (monthly trading volume from MOLIT, Seoul city / two halves / 25 distr
     only from 2020. Stock-based turnover (volume / housing stock) is not built: no stock history with publication dates is available.
 """
 from __future__ import annotations
+
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -37,7 +43,8 @@ FAMILIES = {
     "C": ("obs_age", "fill_ratio26"),
     "V": ("vol_rel36", "vol_chg3", "vol_px_inter"),
     "L": ("r104", "pdev156", "pdev260"),  # long memory of the price itself (long-horizon round)
-    "J": ("sj_level", "sj_dev156", "sj_z156", "sj_level_seoul"),  # price-to-jeonse valuation level and its deviation from the region's own past (long-horizon round)
+    "J": ("sj_level", "sj_dev156", "sj_z156", "sj_level_seoul"),
+    "X": ("fx_r26", "fx_dev156", "fx_r26_seoul", "fx_dev156_seoul"),  # exchange rate (KRW per USD), all regions or Seoul only  # price-to-jeonse valuation level and its deviation from the region's own past (long-horizon round)
 }
 ALL_CANDIDATE_FEATURES = tuple(n for names in FAMILIES.values() for n in names)
 
@@ -113,6 +120,28 @@ def valuation_features(kb: KBPanel) -> dict[str, pd.DataFrame]:
     return {"sj_level": sj, "sj_dev156": dev, "sj_z156": dev / sj.rolling(156, min_periods=78).std().replace(0, np.nan), "sj_level_seoul": sj_seoul}
 
 
+FX_FILE = Path(__file__).parent / "data" / "usdkrw_fred.csv"
+
+
+def fx_features(kb: KBPanel, path: Path | None = None) -> dict[str, pd.DataFrame]:
+    daily = pd.read_csv(path or FX_FILE, parse_dates=["date"]).dropna().sort_values("date")
+    dates = kb.sale.index
+    cutoff = pd.DataFrame({"cut": dates - pd.Timedelta(days=1), "i": np.arange(len(dates))}).sort_values("cut")
+    joined = pd.merge_asof(cutoff, daily, left_on="cut", right_on="date").sort_values("i")
+    lg = pd.Series(np.log(joined["value"].to_numpy(dtype=float)), index=dates)
+    r26 = lg - lg.shift(26)
+    dev = lg - lg.rolling(156, min_periods=104).mean()
+    seoul = kb.sale.columns.isin(seoul_region_keys(kb.hierarchy))
+
+    def broadcast(series: pd.Series, only_seoul: bool) -> pd.DataFrame:
+        frame = pd.DataFrame(np.repeat(series.to_numpy()[:, None], len(kb.sale.columns), axis=1), index=dates, columns=kb.sale.columns)
+        if only_seoul:
+            frame.loc[:, ~seoul] = np.nan
+        return frame
+
+    return {"fx_r26": broadcast(r26, False), "fx_dev156": broadcast(dev, False), "fx_r26_seoul": broadcast(r26, True), "fx_dev156_seoul": broadcast(dev, True)}
+
+
 def monthly_net_counts(history: pd.DataFrame) -> pd.DataFrame:
     """Monthly net deals (reported - cancelled) per district code from the daily history; index = month end."""
     days = pd.to_datetime(history["deal_date"])
@@ -164,6 +193,8 @@ def build_candidate_features(kb: KBPanel, names: tuple[str, ...], history: pd.Da
         out.update(long_memory_features(kb))
     if any(n in FAMILIES["J"] for n in names):
         out.update(valuation_features(kb))
+    if any(n in FAMILIES["X"] for n in names):
+        out.update(fx_features(kb))
     if any(n in FAMILIES["V"] for n in names):
         if history is None:
             raise ValueError("volume features need the trade history (trade_history/<date>/seoul_daily_counts.csv.gz)")
