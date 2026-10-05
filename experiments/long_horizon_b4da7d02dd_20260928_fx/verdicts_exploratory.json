@@ -1,0 +1,70 @@
+{
+  "X_fx": {
+    "verdict": "기각",
+    "score": 0.6465155166344901,
+    "score_horizons": [
+      52,
+      104,
+      208
+    ],
+    "evidence": "탐색적: 같은 과거 자료로 이미 여러 번 탐색된 비교이며 다중검정 미보정 구간으로 내린 판정입니다. 운영 기본값은 자동으로 바뀌지 않습니다 (최종 확인은 전향 기록).",
+    "reasons": [
+      "Seoul-28 mean relative MAE change is not negative"
+    ],
+    "extra_horizons": {
+      "78": 1.9199659139393033
+    }
+  },
+  "X_fx_seoul": {
+    "verdict": "보류",
+    "score": -0.9414242902954043,
+    "score_horizons": [
+      52,
+      104,
+      208
+    ],
+    "evidence": "탐색적: 같은 과거 자료로 이미 여러 번 탐색된 비교이며 다중검정 미보정 구간으로 내린 판정입니다. 운영 기본값은 자동으로 바뀌지 않습니다 (최종 확인은 전향 기록).",
+    "reasons": [
+      "score -0.94% is above -1.0%",
+      "period 2022-2023 worsens by 6.74% (avg over horizons)",
+      "bootstrap 90% interval excludes zero at only 1 of 3 horizons"
+    ],
+    "extra_horizons": {
+      "78": 1.7194919777911322
+    }
+  },
+  "X_fx [Ridge only]": {
+    "verdict": "기각",
+    "score": 0.5645974152040859,
+    "score_horizons": [
+      52,
+      104,
+      208
+    ],
+    "evidence": "탐색적: 같은 과거 자료로 이미 여러 번 탐색된 비교이며 다중검정 미보정 구간으로 내린 판정입니다. 운영 기본값은 자동으로 바뀌지 않습니다 (최종 확인은 전향 기록).",
+    "reasons": [
+      "Seoul-28 mean relative MAE change is not negative"
+    ],
+    "extra_horizons": {
+      "78": 1.9199659139393033
+    }
+  },
+  "X_fx_seoul [Ridge only]": {
+    "verdict": "보류",
+    "score": -0.4124214409031694,
+    "score_horizons": [
+      52,
+      104,
+      208
+    ],
+    "evidence": "탐색적: 같은 과거 자료로 이미 여러 번 탐색된 비교이며 다중검정 미보정 구간으로 내린 판정입니다. 운영 기본값은 자동으로 바뀌지 않습니다 (최종 확인은 전향 기록).",
+    "reasons": [
+      "score -0.41% is above -1.0%",
+      "period 2022-2023 worsens by 7.61% (avg over horizons)",
+      "bootstrap 90% interval excludes zero at only 1 of 3 horizons"
+    ],
+    "extra_horizons": {
+      "78": 1.7194919777911322
+    }
+  }
+}

@@ -1,0 +1,4 @@
+window,chosen,reason,passing_internal,n_candidates_scored,internal_score_X_fx,internal_score_X_fx_seoul,internal_seoul_rows_h52,internal_seoul_rows_h104,internal_seoul_rows_h208
+2020-01-06..2021-12-31,baseline,no candidate passed the internal rule,,2,-3.3848,-0.4358,,,
+2022-01-01..2023-12-31,X_fx_seoul,best passing single candidate (internal score -1.86%),X_fx_seoul,2,0.2073,-1.8614,4676.0000,4032.0000,2688.0000
+2024-01-01..2035-12-31,X_fx_seoul,best passing single candidate (internal score -1.77%),X_fx_seoul,2,0.1656,-1.7701,6020.0000,5348.0000,4004.0000
