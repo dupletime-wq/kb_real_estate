@@ -1,0 +1,68 @@
+{
+  "K_cost": {
+    "verdict": "보류",
+    "score": -1.348861040184616,
+    "score_horizons": [
+      52,
+      104,
+      208
+    ],
+    "evidence": "탐색적: 같은 과거 자료로 이미 여러 번 탐색된 비교이며 다중검정 미보정 구간으로 내린 판정입니다. 운영 기본값은 자동으로 바뀌지 않습니다 (최종 확인은 전향 기록).",
+    "reasons": [
+      "outside Seoul worsens at 208w by 1.42%",
+      "bootstrap 90% interval excludes zero at only 0 of 3 horizons"
+    ],
+    "extra_horizons": {
+      "78": -6.496911673244254
+    }
+  },
+  "K_cost_seoul": {
+    "verdict": "기각",
+    "score": 0.1223479560870618,
+    "score_horizons": [
+      52,
+      104,
+      208
+    ],
+    "evidence": "탐색적: 같은 과거 자료로 이미 여러 번 탐색된 비교이며 다중검정 미보정 구간으로 내린 판정입니다. 운영 기본값은 자동으로 바뀌지 않습니다 (최종 확인은 전향 기록).",
+    "reasons": [
+      "Seoul-28 mean relative MAE change is not negative"
+    ],
+    "extra_horizons": {
+      "78": -0.28998028479073623
+    }
+  },
+  "K_cost [Ridge only]": {
+    "verdict": "보류",
+    "score": -2.05191673423167,
+    "score_horizons": [
+      52,
+      104,
+      208
+    ],
+    "evidence": "탐색적: 같은 과거 자료로 이미 여러 번 탐색된 비교이며 다중검정 미보정 구간으로 내린 판정입니다. 운영 기본값은 자동으로 바뀌지 않습니다 (최종 확인은 전향 기록).",
+    "reasons": [
+      "outside Seoul worsens at 208w by 1.42%",
+      "bootstrap 90% interval excludes zero at only 1 of 3 horizons"
+    ],
+    "extra_horizons": {
+      "78": -6.496911673244254
+    }
+  },
+  "K_cost_seoul [Ridge only]": {
+    "verdict": "기각",
+    "score": 0.5192249980544758,
+    "score_horizons": [
+      52,
+      104,
+      208
+    ],
+    "evidence": "탐색적: 같은 과거 자료로 이미 여러 번 탐색된 비교이며 다중검정 미보정 구간으로 내린 판정입니다. 운영 기본값은 자동으로 바뀌지 않습니다 (최종 확인은 전향 기록).",
+    "reasons": [
+      "Seoul-28 mean relative MAE change is not negative"
+    ],
+    "extra_horizons": {
+      "78": -0.28998028479073623
+    }
+  }
+}
