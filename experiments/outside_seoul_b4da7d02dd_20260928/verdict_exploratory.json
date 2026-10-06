@@ -1,0 +1,21 @@
+{
+  "verdict": "보류",
+  "score": -2.5517034681426076,
+  "reasons": [
+    "outside Seoul is not better at 104w (+2.02%)",
+    "bootstrap 90% interval at 104w includes zero (upper +8.48%)",
+    "all-region MAE worsens at 104w (+1.73%)",
+    "period 2022-2023 worsens by 9.61% (avg over horizons)",
+    "period 2024+ worsens by 3.85% (avg over horizons)"
+  ],
+  "score_horizons": [
+    104,
+    208
+  ],
+  "per_horizon_rel": {
+    "104": 2.018364230786185,
+    "208": -7.1217711670714
+  },
+  "evidence": "탐색적: 같은 과거 자료로 이미 여러 번 탐색된 비교이며 다중검정 미보정 구간으로 내린 판정입니다. 운영 기본값은 자동으로 바뀌지 않습니다 (최종 확인은 전향 기록).",
+  "multiple_testing": "logged candidates 35 (A:6, B:4, C:3, D:2, J:3, K:2, L:3, O:1, P:1, R:2, S:1, V:4, X:2, selection:1); logged primary-horizon comparisons 122; plus ~20 earlier README candidates that were explored without this log (assumed lower bound)"
+}
