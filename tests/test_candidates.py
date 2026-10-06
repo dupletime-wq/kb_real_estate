@@ -495,3 +495,33 @@ def test_supply_features_difference_permits_wait_for_the_lag_and_cover_whole_win
     changed = S.supply_features(kb, altered, pd.DataFrame(hh_rows))
     for name in full:
         pd.testing.assert_series_equal(full[name]["서울특별시"].iloc[:t + 1], changed[name]["서울특별시"].iloc[:t + 1], obj=name)
+
+
+def test_construction_cost_features_wait_for_publication_and_seoul_versions_are_empty_elsewhere():
+    from kbforecast import construction as K
+
+    kb = _kb_with_observed(weeks=420)
+    months = pd.period_range("2005-01", periods=260, freq="M")
+    rows = []
+    for name in ("rebar", "cement"):
+        for i, m in enumerate(months):
+            rows.append({"period": str(m).replace("-", ""), "series": f"ppi_{name}", "value": 100.0 * (1.005 ** i)})
+    for q in pd.period_range("2011Q1", periods=70, freq="Q"):
+        rows.append({"period": str(q), "series": "wage_construction", "value": 100.0 * (1.01 ** (q - pd.Period("2011Q1", freq="Q")).n)})
+    cost = pd.DataFrame(rows)
+    full = K.cost_features(kb, cost)
+    assert set(full) == set(C.FAMILIES["K"])
+    t = 350
+    assert np.isclose(full["cc_mat_r12"]["서울특별시"].iloc[t], 12 * np.log(1.005))
+    assert np.isclose(full["cc_wage_r4"]["서울특별시"].iloc[t], 4 * np.log(1.01))
+    d = kb.sale.index[t]
+    cutoff = (d - pd.Timedelta(days=K.PPI_LAG_DAYS)).to_period("M")
+    altered = cost.copy()
+    mask = altered["series"].str.startswith("ppi_") & (altered["period"] >= str(cutoff).replace("-", ""))
+    altered.loc[mask, "value"] *= 2
+    changed = K.cost_features(kb, altered)
+    pd.testing.assert_series_equal(full["cc_mat_r12"]["서울특별시"].iloc[:t + 1], changed["cc_mat_r12"]["서울특별시"].iloc[:t + 1])
+    seoul = [c for c in kb.sale.columns if c in seoul_region_keys(kb.hierarchy)]
+    other = [c for c in kb.sale.columns if c not in seoul]
+    assert full["cc_mat_r12_seoul"][other].isna().all().all() and full["cc_mat_r12"][other].iloc[t:].notna().all().all()
+    pd.testing.assert_frame_equal(full["cc_mat_r12_seoul"][seoul], full["cc_mat_r12"][seoul])
