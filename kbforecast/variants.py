@@ -57,6 +57,8 @@ NAMED_VARIANTS: dict[str, EngineVariant] = {
     # post-hoc structure (added after J_level's result was seen): the valuation level enters for the Seoul series only
     "J_level_seoul": EngineVariant("J_level_seoul", ("sj_level_seoul",)),
     # exchange-rate round (2026-10-05): two pre-specified candidates, one common feature pair for all regions and the same pair for Seoul only
+    # regional demography round (2026-10-06): one pre-specified candidate (population and household growth)
+    "P_demo": EngineVariant("P_demo", ("pop_g12", "pop_g36", "hh_g12")),
     "X_fx": EngineVariant("X_fx", ("fx_r26", "fx_dev156")),
     "X_fx_seoul": EngineVariant("X_fx_seoul", ("fx_r26_seoul", "fx_dev156_seoul")),
     "L_all": EngineVariant("L_all", ("r104", "pdev156", "pdev260", "sj_level", "sj_dev156", "sj_z156")),

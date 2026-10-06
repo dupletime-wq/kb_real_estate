@@ -18,6 +18,8 @@ Family X  (exchange rate, a market price that is never revised; one common time 
     it is given to). Source: FRED DEXKOUS (Federal Reserve H.10, KRW per USD, NY noon buying rate; bundled snapshot data/usdkrw_fred.csv; NOT the Bank of Korea closing
     rate, so levels differ a little). A week's value is the last observation on or before the day BEFORE the week's date (same one-day lag as the macro series).
     fx_r26 = 26-week log change, fx_dev156 = log rate minus its trailing 156-week mean of weekly values (at least 104 weeks); *_seoul = the same for the Seoul series only.
+Family P  (regional demography, resident registration population and households per si/gun/gu, see regional.py): pop_g12 / pop_g36 = 12 / 36-month log change of the
+    population, hh_g12 = 12-month log change of households. A month is used once its end is 45 days old (assumed lag); merger-affected windows are empty.
 Family V  (monthly trading volume from MOLIT, Seoul city / two halves / 25 districts only; see trades.py for the point-in-time design)
     vol_rel36     log((latest known month + 1) / (mean of the 36 months before it + 1))
     vol_chg3      log((last 3 known months + 1) / (the 3 months before them + 1))
@@ -44,6 +46,7 @@ FAMILIES = {
     "V": ("vol_rel36", "vol_chg3", "vol_px_inter"),
     "L": ("r104", "pdev156", "pdev260"),  # long memory of the price itself (long-horizon round)
     "J": ("sj_level", "sj_dev156", "sj_z156", "sj_level_seoul"),
+    "P": ("pop_g12", "pop_g36", "hh_g12"),  # regional population / household growth (resident registration), see regional.py
     "X": ("fx_r26", "fx_dev156", "fx_r26_seoul", "fx_dev156_seoul"),  # exchange rate (KRW per USD), all regions or Seoul only  # price-to-jeonse valuation level and its deviation from the region's own past (long-horizon round)
 }
 ALL_CANDIDATE_FEATURES = tuple(n for names in FAMILIES.values() for n in names)
@@ -195,6 +198,10 @@ def build_candidate_features(kb: KBPanel, names: tuple[str, ...], history: pd.Da
         out.update(valuation_features(kb))
     if any(n in FAMILIES["X"] for n in names):
         out.update(fx_features(kb))
+    if any(n in FAMILIES["P"] for n in names):
+        from .regional import population_features
+
+        out.update(population_features(kb))
     if any(n in FAMILIES["V"] for n in names):
         if history is None:
             raise ValueError("volume features need the trade history (trade_history/<date>/seoul_daily_counts.csv.gz)")

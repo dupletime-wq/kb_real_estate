@@ -434,3 +434,36 @@ def test_fx_features_use_only_rates_up_to_the_day_before_and_are_causal(tmp_path
     assert seoul and other
     pd.testing.assert_frame_equal(full["fx_dev156_seoul"][seoul], full["fx_dev156"][seoul])
     assert full["fx_dev156_seoul"][other].isna().all().all() and full["fx_dev156"][other].iloc[300:].notna().all().all()
+
+
+def test_population_names_are_normalised_and_features_use_only_known_months(tmp_path):
+    from kbforecast import regional as R
+
+    assert R.normalise_name("전남광주통합특별시 동구") == ("광주", "동구")
+    assert R.normalise_name("전남광주통합특별시 목포시") == ("전남", "목포시")
+    assert R.normalise_name("강원특별자치도 춘천시") == ("강원", "춘천시")
+    assert R.normalise_name("인천광역시 남구") == ("인천", "미추홀구")
+    kb = _kb_with_observed(weeks=420)
+    months = pd.period_range("2008-01", periods=250, freq="M")
+    rows = []
+    for key in ("서울특별시", "강남구"):
+        for i, m in enumerate(months):
+            rows.append({"ym": str(m), "code": "1100000000" if key == "서울특별시" else "1168000000", "name": "서울특별시" if key == "서울특별시" else "서울특별시 강남구",
+                         "pop": 1_000_000 * (1.002 ** i), "households": 400_000 * (1.001 ** i)})
+    pop = pd.DataFrame(rows)
+    full = R.population_features(kb, pop)
+    assert set(full) == set(C.FAMILIES["P"])
+    t = 300
+    d = kb.sale.index[t]
+    last_usable = (d - pd.Timedelta(days=R.POP_LAG_DAYS)).to_period("M")
+    last_usable = last_usable if last_usable.end_time.normalize() <= d - pd.Timedelta(days=R.POP_LAG_DAYS) else last_usable - 1
+    i = (last_usable - months[0]).n
+    expected = np.log(1.002 ** 12)
+    assert np.isclose(full["pop_g12"]["서울특별시"].iloc[t], expected) and i >= 12
+    # changing a month that is not yet usable at week t leaves every earlier week unchanged
+    altered = pop.copy()
+    cutoff = (last_usable + 1).strftime("%Y-%m")
+    altered.loc[altered["ym"] >= cutoff, "pop"] *= 3
+    changed = R.population_features(kb, altered)
+    for name in full:
+        pd.testing.assert_frame_equal(full[name].iloc[:t + 1], changed[name].iloc[:t + 1], obj=name)
