@@ -1,0 +1,36 @@
+{
+  "S_supply": {
+    "verdict": "기각",
+    "score": 0.11717695640061827,
+    "score_horizons": [
+      52,
+      104,
+      208
+    ],
+    "evidence": "탐색적: 같은 과거 자료로 이미 여러 번 탐색된 비교이며 다중검정 미보정 구간으로 내린 판정입니다. 운영 기본값은 자동으로 바뀌지 않습니다 (최종 확인은 전향 기록).",
+    "reasons": [
+      "Seoul-28 mean relative MAE change is not negative"
+    ],
+    "extra_horizons": {
+      "78": -0.41554088772254305
+    }
+  },
+  "S_supply [Ridge only]": {
+    "verdict": "보류",
+    "score": -0.061200791270987764,
+    "score_horizons": [
+      52,
+      104,
+      208
+    ],
+    "evidence": "탐색적: 같은 과거 자료로 이미 여러 번 탐색된 비교이며 다중검정 미보정 구간으로 내린 판정입니다. 운영 기본값은 자동으로 바뀌지 않습니다 (최종 확인은 전향 기록).",
+    "reasons": [
+      "score -0.06% is above -1.0%",
+      "outside Seoul worsens at 208w by 1.02%",
+      "bootstrap 90% interval excludes zero at only 0 of 3 horizons"
+    ],
+    "extra_horizons": {
+      "78": -0.41554088772254305
+    }
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "J_level_seoul": {
+    "verdict": "보류",
+    "score": -5.026832748438704,
+    "score_horizons": [
+      104,
+      208
+    ],
+    "evidence": "탐색적: 같은 과거 자료로 이미 여러 번 탐색된 비교이며 다중검정 미보정 구간으로 내린 판정입니다. 운영 기본값은 자동으로 바뀌지 않습니다 (최종 확인은 전향 기록).",
+    "reasons": [
+      "period 2024+ worsens by 2.84% (avg over horizons)"
+    ],
+    "extra_horizons": {
+      "78": -1.3690489261404593
+    }
+  },
+  "J_level_seoul [Ridge only]": {
+    "verdict": "보류",
+    "score": -5.026832748438704,
+    "score_horizons": [
+      104,
+      208
+    ],
+    "evidence": "탐색적: 같은 과거 자료로 이미 여러 번 탐색된 비교이며 다중검정 미보정 구간으로 내린 판정입니다. 운영 기본값은 자동으로 바뀌지 않습니다 (최종 확인은 전향 기록).",
+    "reasons": [
+      "period 2024+ worsens by 2.84% (avg over horizons)"
+    ],
+    "extra_horizons": {
+      "78": -1.3690489261404593
+    }
+  }
+}

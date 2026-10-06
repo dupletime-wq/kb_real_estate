@@ -1,0 +1,4 @@
+window,chosen,reason,passing_internal,n_candidates_scored,internal_score_J_level,internal_score_J_dev,internal_seoul_rows_h104,internal_seoul_rows_h208
+2020-01-06..2021-12-31,baseline,no candidate passed the internal rule,,2,-13.3590,8.0584,,
+2022-01-01..2023-12-31,baseline,no candidate passed the internal rule,,2,-8.8272,0.4634,,
+2024-01-01..2035-12-31,J_level,best passing single candidate (internal score -6.85%),J_level,2,-6.8512,-1.0490,5348.0000,4004.0000

@@ -1,0 +1,25 @@
+horizon,set,model,n,MAE
+13,Seoul 28,base,8372,0.9096
+13,Seoul 28,"primary (net, assumed lag)",8372,0.9269
+13,Seoul 28,lag + 4 weeks,8372,0.9115
+13,Seoul 28,gross counts,8372,0.9261
+13,All regions,base,54689,0.7151
+13,All regions,"primary (net, assumed lag)",54689,0.7163
+13,All regions,lag + 4 weeks,54689,0.7148
+13,All regions,gross counts,54689,0.7162
+26,Seoul 28,base,8148,2.0357
+26,Seoul 28,"primary (net, assumed lag)",8148,2.0493
+26,Seoul 28,lag + 4 weeks,8148,2.0463
+26,Seoul 28,gross counts,8148,2.0488
+26,All regions,base,53191,1.6627
+26,All regions,"primary (net, assumed lag)",53191,1.6598
+26,All regions,lag + 4 weeks,53191,1.6612
+26,All regions,gross counts,53191,1.6600
+52,Seoul 28,base,7812,4.0751
+52,Seoul 28,"primary (net, assumed lag)",7812,4.0570
+52,Seoul 28,lag + 4 weeks,7812,4.0552
+52,Seoul 28,gross counts,7812,4.0547
+52,All regions,base,50933,3.8616
+52,All regions,"primary (net, assumed lag)",50933,3.8570
+52,All regions,lag + 4 weeks,50933,3.8542
+52,All regions,gross counts,50933,3.8573

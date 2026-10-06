@@ -91,6 +91,7 @@ class HubReport:
     matched_regions: int = 0
     total_regions: int = 0
     ended_regions: tuple[str, ...] = field(default_factory=tuple)  # active in the workbook, but their hub series ended
+    proxied_sentiment: tuple[str, ...] = field(default_factory=tuple)  # sentiment scopes whose new weeks are ESTIMATED from a parent scope's change, not observed
 
 
 # ----------------------------------------------------------------------------- fetching
@@ -276,4 +277,4 @@ def extend_kb_panel(kb: KBPanel, hub: HubData) -> tuple[KBPanel, HubReport]:
         kb, sale=sale, jeonse=jeonse, sentiment=sentiment, observed=observed,
         fingerprint=f"{kb.fingerprint}+hub{new_dates[-1]:%Y%m%d}",
     )
-    return extended, HubReport(True, text, tuple(new_dates), len(covered), len(active), ended)
+    return extended, HubReport(True, text, tuple(new_dates), len(covered), len(active), ended, tuple(sorted(proxied)))

@@ -32,7 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from kbforecast.engine import ANCHORS, CONFORMAL_LEVELS, ENGINE_VERSION, RIDGE_ALPHA, blend_model, model_columns  # noqa: E402
 from kbforecast.evaluation import PERIODS, WFConfig, baseline_predictions, walk_forward  # noqa: E402
 from kbforecast.features import build_features, make_targets  # noqa: E402
-from kbforecast.forecastlog import git_commit  # noqa: E402
+from kbforecast.forecastlog import git_commit, library_versions  # noqa: E402
 from kbforecast.intervals import conformal_quantiles, interval_score, scale_from_vol  # noqa: E402
 from kbforecast.kb_panel import SEOUL_GROUPS, parse_kb_panel, seoul_region_keys  # noqa: E402
 from kbforecast.overlay import apply_seoul_rate_overlay, load_base_rate, load_cd91, rate_signal_weekly  # noqa: E402
@@ -130,7 +130,7 @@ def main() -> None:
     run_dir = args.out_dir / f"long_{tag}_{dates[-1]:%Y%m%d}"
     run_dir.mkdir(parents=True, exist_ok=True)
     config = {
-        "script": "scripts/validate_long.py", "git_commit": git_commit(Path(__file__).resolve().parents[1]), "data_fingerprint": kb.fingerprint,
+        "script": "scripts/validate_long.py", "git_commit": git_commit(Path(__file__).resolve().parents[1]), "versions": library_versions(), "data_fingerprint": kb.fingerprint,
         "last_date": str(dates[-1].date()), "labels": tag, "engine_version": ENGINE_VERSION, "feature_columns": cols, "anchors": list(ANCHORS),
         "ridge_alpha": {str(k): v for k, v in RIDGE_ALPHA.items()}, "refit_every": 26, "eval_step": 2, "first_origin": args.first_origin,
         "baseline_shrink": SHRINK, "interval_levels": {str(k): list(v) for k, v in CONFORMAL_LEVELS.items()}, "interval_window_weeks": 260,

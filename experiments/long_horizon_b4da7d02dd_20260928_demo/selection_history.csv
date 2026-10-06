@@ -1,0 +1,4 @@
+window,chosen,reason,passing_internal,n_candidates_scored,internal_score_P_demo
+2020-01-06..2021-12-31,baseline,no candidate passed the internal rule,,1,-2.0855
+2022-01-01..2023-12-31,baseline,no candidate passed the internal rule,,1,-0.5263
+2024-01-01..2035-12-31,baseline,no candidate passed the internal rule,,1,-0.7495

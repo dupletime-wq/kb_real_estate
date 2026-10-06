@@ -1,0 +1,4 @@
+window,chosen,reason,passing_internal,n_candidates_scored,internal_score_S_supply,internal_seoul_rows_h52,internal_seoul_rows_h104,internal_seoul_rows_h208
+2020-01-06..2021-12-31,S_supply,best passing single candidate (internal score -4.17%),S_supply,1,-4.1713,3360.0000,2744.0000,1344.0000
+2022-01-01..2023-12-31,baseline,no candidate passed the internal rule,,1,-0.5797,,,
+2024-01-01..2035-12-31,baseline,no candidate passed the internal rule,,1,-0.5530,,,

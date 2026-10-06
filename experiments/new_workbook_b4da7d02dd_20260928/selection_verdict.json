@@ -1,0 +1,22 @@
+{
+  "verdict": "보류",
+  "score": -0.04004285854897205,
+  "score_horizons": [
+    13,
+    26,
+    52
+  ],
+  "evidence": "탐색적: 같은 과거 자료로 이미 여러 번 탐색된 비교이며 다중검정 미보정 구간으로 내린 판정입니다. 운영 기본값은 자동으로 바뀌지 않습니다 (최종 확인은 전향 기록).",
+  "reasons": [
+    "score -0.04% is above -1.0%",
+    "bootstrap 90% interval excludes zero at only 0 of 3 horizons"
+  ],
+  "share_baseline_chosen": {
+    "13": 0.6070182709909163,
+    "26": 0.6316262353998203,
+    "52": 0.6802002659782523,
+    "78": 0.753968253968254,
+    "104": 0.8428246013667426
+  },
+  "multiple_testing": "logged candidates 16 (A:6, B:4, C:3, D:2, selection:1); logged primary-horizon comparisons 48; plus ~20 earlier README candidates that were explored without this log (assumed lower bound)"
+}

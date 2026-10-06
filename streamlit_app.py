@@ -17,7 +17,7 @@ from kbforecast.hub import HubData, HubReport, extend_kb_panel, fetch_hub
 from kbforecast.indicators import IndicatorResult, evaluate_indicators
 from kbforecast.kb_panel import KBPanel, parse_kb_panel, seoul_region_keys
 from kbforecast.macro import ecos_api_key, load_macro, macro_weekly
-from kbforecast.report import validation_table
+from kbforecast.report import data_diagnostics, validation_table
 from kbforecast.overlay import RateSeries, load_base_rate, load_cd91, scenario_adjustments
 
 APP_TITLE = "KB 부동산 시세 예측 대시보드"
@@ -433,6 +433,33 @@ def _validation_tab(fit: EngineFit, kb: KBPanel, region: str, horizon: int) -> N
     )
 
 
+def _diagnostics_tab(kb: KBPanel, hub_report: HubReport | None, hub_problem: str | None, rate: RateSeries | None, cd: RateSeries | None) -> None:
+    diag = data_diagnostics(kb, hub_report, hub_problem, rate, cd)
+    st.markdown("**예측이 기대는 입력의 상태** — 오래됐거나, 채웠거나, 추정한 값을 숨기지 않고 보여줍니다.")
+    st.dataframe(diag["headline"], width="stretch", hide_index=True)
+    regions = diag["regions"]
+    flagged = regions[regions["status"] != "정상"].sort_values("weeks_since_real_observation", ascending=False)
+    st.markdown(f"**가격지수: 실제 관측이 끊겼거나 채운 지역** ({len(flagged)}개 / 전체 {len(regions)}개)")
+    if flagged.empty:
+        st.caption("모든 지역의 마지막 주 값이 실제 관측이고 최근 26주에 채운 값이 없습니다.")
+    else:
+        st.dataframe(
+            flagged.rename(columns={"region": "지역", "last_real_observation": "마지막 실제 관측", "weeks_since_real_observation": "경과(주)", "filled_share_last_26w": "최근 26주 채움 비율", "status": "상태"}),
+            width="stretch", hide_index=True, column_config={"최근 26주 채움 비율": st.column_config.NumberColumn(format="%.2f"), "경과(주)": st.column_config.NumberColumn(format="%.1f")},
+        )
+    sent = diag["sentiment"]
+    est = sent[sent["newest_weeks"].str.startswith("추정")]
+    st.markdown("**심리지표: 최신 주가 추정인 범위**")
+    if est.empty:
+        st.caption("추정으로 채운 심리 값이 없습니다(허브 보강을 쓰지 않았거나, 모든 범위가 실제 값).")
+    else:
+        st.dataframe(est.rename(columns={"indicator": "지표", "scope": "범위", "last_value_date": "마지막 값 날짜", "newest_weeks": "최신 주"}), width="stretch", hide_index=True)
+    st.caption(
+        "예측 기록(`scripts/forecast_log.py`)에는 입력 상태를 따로 저장하지 않으므로, 추정 심리를 쓴 예측과 아닌 예측의 성과 비교는 앞으로 쌓이는 기록에서만 가능합니다. "
+        "워크북 자체의 과거 심리 값에는 관측/추정 구분 기록이 없어 복원하지 않았습니다."
+    )
+
+
 def _rank_tab(fit: EngineFit, kb: KBPanel, horizon: int) -> None:
     anchor = min(fit.anchors, key=lambda a: abs(a - horizon))
     pred = fit.predictions[anchor]
@@ -567,7 +594,7 @@ def main() -> None:
         st.warning(f"이 지역은 예측할 수 없습니다: {exc}")
         fc = None
 
-    tab_names = ["예측", "예측 근거", "검증", "지역 순위", "기술지표"]
+    tab_names = ["예측", "예측 근거", "검증", "지역 순위", "기술지표", "데이터 진단"]
     tabs = st.tabs(tab_names)
     with tabs[0]:
         if fc is None:
@@ -627,6 +654,8 @@ def main() -> None:
                                "p-value": st.column_config.NumberColumn(format="%.4f")},
             )
         st.plotly_chart(make_technical_chart(series, ind), width="stretch")
+    with tabs[5]:
+        _diagnostics_tab(kb, hub_report, hub_problem, rate, cd)
 
 
 if __name__ == "__main__":

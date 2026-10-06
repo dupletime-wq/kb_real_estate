@@ -1,0 +1,37 @@
+{
+  "P_demo": {
+    "verdict": "보류",
+    "score": -0.3479450751042057,
+    "score_horizons": [
+      52,
+      104,
+      208
+    ],
+    "evidence": "탐색적: 같은 과거 자료로 이미 여러 번 탐색된 비교이며 다중검정 미보정 구간으로 내린 판정입니다. 운영 기본값은 자동으로 바뀌지 않습니다 (최종 확인은 전향 기록).",
+    "reasons": [
+      "score -0.35% is above -1.0%",
+      "period 2020-2021 worsens by 2.06% (avg over horizons)",
+      "bootstrap 90% interval excludes zero at only 1 of 3 horizons"
+    ],
+    "extra_horizons": {
+      "78": -0.26394542656171804
+    }
+  },
+  "P_demo [Ridge only]": {
+    "verdict": "보류",
+    "score": -0.4331942036714276,
+    "score_horizons": [
+      52,
+      104,
+      208
+    ],
+    "evidence": "탐색적: 같은 과거 자료로 이미 여러 번 탐색된 비교이며 다중검정 미보정 구간으로 내린 판정입니다. 운영 기본값은 자동으로 바뀌지 않습니다 (최종 확인은 전향 기록).",
+    "reasons": [
+      "score -0.43% is above -1.0%",
+      "bootstrap 90% interval excludes zero at only 1 of 3 horizons"
+    ],
+    "extra_horizons": {
+      "78": -0.26394542656171804
+    }
+  }
+}

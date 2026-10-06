@@ -1,0 +1,20 @@
+{
+  "verdict": "기각",
+  "score": 0.0,
+  "score_horizons": [
+    52,
+    104,
+    208
+  ],
+  "evidence": "탐색적: 같은 과거 자료로 이미 여러 번 탐색된 비교이며 다중검정 미보정 구간으로 내린 판정입니다. 운영 기본값은 자동으로 바뀌지 않습니다 (최종 확인은 전향 기록).",
+  "reasons": [
+    "Seoul-28 mean relative MAE change is not negative"
+  ],
+  "share_baseline_chosen": {
+    "52": 1.0,
+    "104": 1.0,
+    "208": 1.0,
+    "78": 1.0
+  },
+  "multiple_testing": "logged candidates 25 (A:6, B:4, C:3, D:2, L:3, R:2, V:4, selection:1); logged primary-horizon comparisons 96; plus ~20 earlier README candidates that were explored without this log (assumed lower bound)"
+}

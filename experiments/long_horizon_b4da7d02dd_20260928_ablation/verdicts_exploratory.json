@@ -1,0 +1,66 @@
+{
+  "J_level": {
+    "verdict": "보류",
+    "score": -6.386013579440981,
+    "score_horizons": [
+      104,
+      208
+    ],
+    "evidence": "탐색적: 같은 과거 자료로 이미 여러 번 탐색된 비교이며 다중검정 미보정 구간으로 내린 판정입니다. 운영 기본값은 자동으로 바뀌지 않습니다 (최종 확인은 전향 기록).",
+    "reasons": [
+      "bootstrap 90% interval excludes zero at only 1 of 2 horizons"
+    ],
+    "extra_horizons": {
+      "78": -1.0584498834972367
+    }
+  },
+  "J_dev": {
+    "verdict": "보류",
+    "score": -0.966224541832239,
+    "score_horizons": [
+      104,
+      208
+    ],
+    "evidence": "탐색적: 같은 과거 자료로 이미 여러 번 탐색된 비교이며 다중검정 미보정 구간으로 내린 판정입니다. 운영 기본값은 자동으로 바뀌지 않습니다 (최종 확인은 전향 기록).",
+    "reasons": [
+      "score -0.97% is above -1.0%",
+      "outside Seoul worsens at 104w by 4.70%",
+      "bootstrap 90% interval excludes zero at only 0 of 2 horizons"
+    ],
+    "extra_horizons": {
+      "78": -1.1044070409279683
+    }
+  },
+  "J_level [Ridge only]": {
+    "verdict": "보류",
+    "score": -6.386013579440981,
+    "score_horizons": [
+      104,
+      208
+    ],
+    "evidence": "탐색적: 같은 과거 자료로 이미 여러 번 탐색된 비교이며 다중검정 미보정 구간으로 내린 판정입니다. 운영 기본값은 자동으로 바뀌지 않습니다 (최종 확인은 전향 기록).",
+    "reasons": [
+      "bootstrap 90% interval excludes zero at only 1 of 2 horizons"
+    ],
+    "extra_horizons": {
+      "78": -1.0584498834972367
+    }
+  },
+  "J_dev [Ridge only]": {
+    "verdict": "보류",
+    "score": -0.966224541832239,
+    "score_horizons": [
+      104,
+      208
+    ],
+    "evidence": "탐색적: 같은 과거 자료로 이미 여러 번 탐색된 비교이며 다중검정 미보정 구간으로 내린 판정입니다. 운영 기본값은 자동으로 바뀌지 않습니다 (최종 확인은 전향 기록).",
+    "reasons": [
+      "score -0.97% is above -1.0%",
+      "outside Seoul worsens at 104w by 4.70%",
+      "bootstrap 90% interval excludes zero at only 0 of 2 horizons"
+    ],
+    "extra_horizons": {
+      "78": -1.1044070409279683
+    }
+  }
+}

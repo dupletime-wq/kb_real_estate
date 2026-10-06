@@ -1,0 +1,19 @@
+{
+  "verdict": "보류",
+  "score": -7.3151194044763335,
+  "score_horizons": [
+    104,
+    208
+  ],
+  "evidence": "탐색적: 같은 과거 자료로 이미 여러 번 탐색된 비교이며 다중검정 미보정 구간으로 내린 판정입니다. 운영 기본값은 자동으로 바뀌지 않습니다 (최종 확인은 전향 기록).",
+  "reasons": [
+    "period 2024+ worsens by 2.84% (avg over horizons)",
+    "bootstrap 90% interval excludes zero at only 1 of 2 horizons"
+  ],
+  "share_baseline_chosen": {
+    "104": 0.0,
+    "208": 0.0,
+    "78": 0.0
+  },
+  "multiple_testing": "logged candidates 28 (A:6, B:4, C:3, D:2, J:3, L:3, R:2, V:4, selection:1); logged primary-horizon comparisons 102; plus ~20 earlier README candidates that were explored without this log (assumed lower bound)"
+}

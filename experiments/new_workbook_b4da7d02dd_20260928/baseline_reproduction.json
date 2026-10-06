@@ -1,0 +1,18 @@
+{
+  "verdict": "fail",
+  "checks": {
+    "data_fingerprint_equal": false,
+    "feature_columns_equal": true,
+    "refit_every_equal": true,
+    "labels_equal": true
+  },
+  "problems": [
+    "data_fingerprint_equal"
+  ],
+  "warnings": [],
+  "tolerances": {
+    "label": 1e-05,
+    "final_mean_abs_diff": 0.0005,
+    "seoul28_mae_rel_pct": 0.5
+  }
+}

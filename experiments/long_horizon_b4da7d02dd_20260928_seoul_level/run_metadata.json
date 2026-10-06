@@ -1,0 +1,26 @@
+{
+  "workbook_sha256": "b4da7d02dd788a6159e39b54e469ff4a18f758e820aad3d3ad81d3b118a9aafd",
+  "last_date": "2026-09-28",
+  "git_commit": "82ad62fdc0743afe5ceb564e20a2f12aa43b5331",
+  "versions": {
+    "python": "3.11.15",
+    "numpy": "2.4.6",
+    "pandas": "3.0.6",
+    "scipy": "1.17.1",
+    "scikit_learn": "1.9.1",
+    "streamlit": "1.64.0"
+  },
+  "primary_horizons": [
+    104,
+    208
+  ],
+  "extra_horizons": [
+    78
+  ],
+  "refit_every": 26,
+  "labels": "observed-only",
+  "candidates": [
+    "J_level_seoul"
+  ],
+  "evidence": "탐색적: 같은 과거 자료로 이미 여러 번 탐색된 비교이며 다중검정 미보정 구간으로 내린 판정입니다. 운영 기본값은 자동으로 바뀌지 않습니다 (최종 확인은 전향 기록)."
+}

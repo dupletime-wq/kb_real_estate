@@ -1,6 +1,6 @@
 """Reproduce the headline walk-forward validation on a KB weekly workbook.
 
-    python scripts/validate.py path/to/KB_주간시계열.xlsx [--first-origin 2014-01-06] [--observed-only]
+    python scripts/validate.py path/to/KB_주간시계열.xlsx [--first-origin 2014-01-06] [--filled]
 
 For every horizon it retrains at every 26-week refit point using only labels that have closed by then, predicts
 the next origins, and compares the production blend with a random walk, a 26-week drift extrapolation and a
@@ -32,9 +32,9 @@ def main() -> None:
     parser.add_argument("--first-origin", default="2014-01-06")
     parser.add_argument("--horizons", default="13,26,52")
     parser.add_argument(
-        "--observed-only",
+        "--filled",
         action="store_true",
-        help="build training and validation targets only where the origin price and the price h weeks later were actual observations (no filled values)",
+        help="allow targets built from filled prices (the older, weaker evaluation). Default: targets only where the origin price and the price h weeks later were actual observations, as in the engine and scripts/validate_long.py",
     )
     args = parser.parse_args()
 
@@ -49,7 +49,7 @@ def main() -> None:
     for h in (int(x) for x in args.horizons.split(",")):
         cfg = WFConfig(horizon=h, first_origin=args.first_origin, eval_step=2, refit_every=26)
         rw, drift = baseline_predictions(fs, h, "rw"), baseline_predictions(fs, h, "drift26")
-        y = make_targets(fs.log_price, h, kb.observed["sale"]) if args.observed_only else None
+        y = make_targets(fs.log_price, h, kb.observed["sale"]) if not args.filled and kb.observed is not None else None
         linmom = walk_forward(fs, ["r13", "r26", "r52"], M.ridge_model(50.0), cfg, y=y)
         blend = walk_forward(fs, cols, blend_model(h), cfg, y=y)
         for label, subset in (("Seoul (28 series)", seoul), ("All regions", None)):

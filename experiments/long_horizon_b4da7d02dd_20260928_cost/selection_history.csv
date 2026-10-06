@@ -1,0 +1,4 @@
+window,chosen,reason,passing_internal,n_candidates_scored,internal_score_K_cost,internal_score_K_cost_seoul,internal_seoul_rows_h52,internal_seoul_rows_h104,internal_seoul_rows_h208
+2020-01-06..2021-12-31,baseline,no candidate passed the internal rule,,2,0.3774,1.5185,,,
+2022-01-01..2023-12-31,baseline,no candidate passed the internal rule,,2,0.2620,-1.3482,,,
+2024-01-01..2035-12-31,K_cost_seoul,best passing single candidate (internal score -1.25%),K_cost_seoul,2,-1.1343,-1.2473,6020.0000,5348.0000,4004.0000
