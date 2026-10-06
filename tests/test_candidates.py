@@ -467,3 +467,31 @@ def test_population_names_are_normalised_and_features_use_only_known_months(tmp_
     changed = R.population_features(kb, altered)
     for name in full:
         pd.testing.assert_frame_equal(full[name].iloc[:t + 1], changed[name].iloc[:t + 1], obj=name)
+
+
+def test_supply_features_difference_permits_wait_for_the_lag_and_cover_whole_windows():
+    from kbforecast import supply as S
+
+    kb = _kb_with_observed(weeks=420)
+    months = pd.period_range("2008-01", periods=200, freq="M")
+    rows, hh_rows = [], []
+    for sido in ("서울", "경기"):
+        for i, m in enumerate(months):
+            rows.append({"ym": str(m), "sido": sido, "permits": 100.0 * m.month, "starts": 50.0, "completions": 30.0})  # permits: cumulative within the year
+            hh_rows.append({"ym": str(m), "code": "1100000000" if sido == "서울" else "4100000000", "name": "서울특별시" if sido == "서울" else "경기도", "pop": 2_000_000.0, "households": 1_000_000.0})
+    supply = pd.DataFrame(rows)
+    monthly = S.monthly_wide(supply)
+    assert (monthly["permits"]["서울"].dropna() == 100.0).all()  # 100 per month after differencing the year-to-date totals
+    full = S.supply_features(kb, supply, pd.DataFrame(hh_rows))
+    assert set(full) == set(C.FAMILIES["S"])
+    t = 300
+    d = kb.sale.index[t]
+    assert np.isclose(full["sup_cmp12"]["서울특별시"].iloc[t], 12 * 30.0 / 1_000_000 * 1000)
+    assert np.isclose(full["sup_permit36"]["서울특별시"].iloc[t], 36 * 100.0 / 1_000_000 * 1000)
+    # a month that is not yet 60 days old cannot change that week's value
+    altered = supply.copy()
+    cutoff = (d - pd.Timedelta(days=S.SUPPLY_LAG_DAYS)).to_period("M")
+    altered.loc[altered["ym"] >= str(cutoff), ["starts", "completions"]] *= 10
+    changed = S.supply_features(kb, altered, pd.DataFrame(hh_rows))
+    for name in full:
+        pd.testing.assert_series_equal(full[name]["서울특별시"].iloc[:t + 1], changed[name]["서울특별시"].iloc[:t + 1], obj=name)

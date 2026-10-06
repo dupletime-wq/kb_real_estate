@@ -20,6 +20,8 @@ Family X  (exchange rate, a market price that is never revised; one common time 
     fx_r26 = 26-week log change, fx_dev156 = log rate minus its trailing 156-week mean of weekly values (at least 104 weeks); *_seoul = the same for the Seoul series only.
 Family P  (regional demography, resident registration population and households per si/gun/gu, see regional.py): pop_g12 / pop_g36 = 12 / 36-month log change of the
     population, hh_g12 = 12-month log change of households. A month is used once its end is 45 days old (assumed lag); merger-affected windows are empty.
+Family S  (housing supply pipeline, province level, see supply.py): sup_cmp12 = completions of the last 12 months, sup_start24 = starts of the last 24 months,
+    sup_permit36 = permits of the last 36 months, each per 1000 households; a month is known 60 days after its end (assumed lag).
 Family V  (monthly trading volume from MOLIT, Seoul city / two halves / 25 districts only; see trades.py for the point-in-time design)
     vol_rel36     log((latest known month + 1) / (mean of the 36 months before it + 1))
     vol_chg3      log((last 3 known months + 1) / (the 3 months before them + 1))
@@ -46,6 +48,7 @@ FAMILIES = {
     "V": ("vol_rel36", "vol_chg3", "vol_px_inter"),
     "L": ("r104", "pdev156", "pdev260"),  # long memory of the price itself (long-horizon round)
     "J": ("sj_level", "sj_dev156", "sj_z156", "sj_level_seoul"),
+    "S": ("sup_cmp12", "sup_start24", "sup_permit36"),  # housing supply pipeline per 1000 households at province level, see supply.py
     "P": ("pop_g12", "pop_g36", "hh_g12"),  # regional population / household growth (resident registration), see regional.py
     "X": ("fx_r26", "fx_dev156", "fx_r26_seoul", "fx_dev156_seoul"),  # exchange rate (KRW per USD), all regions or Seoul only  # price-to-jeonse valuation level and its deviation from the region's own past (long-horizon round)
 }
@@ -198,6 +201,10 @@ def build_candidate_features(kb: KBPanel, names: tuple[str, ...], history: pd.Da
         out.update(valuation_features(kb))
     if any(n in FAMILIES["X"] for n in names):
         out.update(fx_features(kb))
+    if any(n in FAMILIES["S"] for n in names):
+        from .supply import supply_features
+
+        out.update(supply_features(kb))
     if any(n in FAMILIES["P"] for n in names):
         from .regional import population_features
 

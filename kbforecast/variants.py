@@ -58,6 +58,8 @@ NAMED_VARIANTS: dict[str, EngineVariant] = {
     "J_level_seoul": EngineVariant("J_level_seoul", ("sj_level_seoul",)),
     # exchange-rate round (2026-10-05): two pre-specified candidates, one common feature pair for all regions and the same pair for Seoul only
     # regional demography round (2026-10-06): one pre-specified candidate (population and household growth)
+    # housing supply pipeline round (2026-10-06): one pre-specified candidate (completions, starts, permits per 1000 households, province level)
+    "S_supply": EngineVariant("S_supply", ("sup_cmp12", "sup_start24", "sup_permit36")),
     "P_demo": EngineVariant("P_demo", ("pop_g12", "pop_g36", "hh_g12")),
     "X_fx": EngineVariant("X_fx", ("fx_r26", "fx_dev156")),
     "X_fx_seoul": EngineVariant("X_fx_seoul", ("fx_r26_seoul", "fx_dev156_seoul")),

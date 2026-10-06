@@ -100,9 +100,9 @@ def map_to_kb(pop: pd.DataFrame, hierarchy: pd.DataFrame) -> dict[str, pd.DataFr
     return out
 
 
-def _as_of_weekly(monthly: pd.DataFrame, dates: pd.DatetimeIndex) -> pd.DataFrame:
-    """Latest month usable at each week (month end at least POP_LAG_DAYS old); never interpolated."""
-    cutoff = (dates - pd.Timedelta(days=POP_LAG_DAYS)).to_numpy()
+def _as_of_weekly(monthly: pd.DataFrame, dates: pd.DatetimeIndex, lag_days: int = POP_LAG_DAYS) -> pd.DataFrame:
+    """Latest month usable at each week (month end at least `lag_days` old); never interpolated."""
+    cutoff = (dates - pd.Timedelta(days=lag_days)).to_numpy()
     idx = np.searchsorted(monthly.index.to_numpy(), cutoff, side="right") - 1
     v = monthly.to_numpy()
     out = np.full((len(dates), v.shape[1]), np.nan)
